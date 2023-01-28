@@ -79,7 +79,6 @@ def blend(a, b, alpha=1.0):
 
 def grayscale(rgb, mode='itu', keep_channels=False):
     "Convert RGB image (float array) to L"
-    print(rgb.shape)
     R, G, B = (rgb[:, :, c] for c in range(3))
 
     if mode == 'itu':
