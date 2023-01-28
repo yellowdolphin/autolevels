@@ -11,6 +11,8 @@ parser = ArgumentParser(description='Set proper blackpoint for each image channe
 parser.add_argument('--blackpoint', nargs='+', default=14, help="target for soft blackpoint")
 parser.add_argument('--pixel', default=0.005, help="percentage of pixel darker than blackpoint")
 parser.add_argument('--mode', default='hist', help='sample mode: "smooth", "smoother", or "hist"')
+parser.add_argument('--gamma', nargs='+', type=float, default=1.0, 
+                               help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
 parser.add_argument('--folder', default='.')
 parser.add_argument('--prefix', default='Magazin')
 parser.add_argument('--magazine', default=1)
@@ -24,6 +26,8 @@ arg = parser.parse_args()
 thr_black = np.array(arg.blackpoint, dtype=int)
 thr_pixel = float(arg.pixel)
 sample_mode = arg.mode
+assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
+gamma = 1 / np.array(arg.gamma, dtype=float)
 
 path = Path(arg.folder)
 if arg.files:
@@ -71,7 +75,7 @@ for fn in fns:
     img = Image.open(fn)
     blackpoint = get_blackpoint(img, sample_mode, thr_pixel)
 
-    if (blackpoint < thr_black).all():
+    if (blackpoint < thr_black).all() and (gamma == 1).all():
         #copy2(fn, ou_fn)
         #print(f"{fn} -> {out_fn} (no change)")
         print(f"skipping {fn} (blackpoint OK)")
@@ -84,8 +88,13 @@ for fn in fns:
     stretch_factor = whitepoint / (whitepoint - shift)
     array = np.array(img, dtype=np.float64)
     array = (array - shift) * stretch_factor
-    #print("normalized array:", array.min(axis=(0, 1)), array.max(axis=(0, 1)))
     array = array.clip(0, 255)
+    #print("normalized array:", array.min(axis=(0, 1)), array.max(axis=(0, 1)))
+    
+    # Gamma correction
+    if (gamma != 1).any():
+        array = 255 * np.power(array / 255, gamma)
+
     img = Image.fromarray(np.uint8(array))
     #smoothened = img.filter(SMOOTH)
     #new_blackpoint = np.amin(smoothened, axis=(0, 1))
@@ -96,4 +105,3 @@ for fn in fns:
     print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {thr_black})")
     img.save(out_fn)
     #print()
-
