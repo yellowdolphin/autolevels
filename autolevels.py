@@ -13,7 +13,7 @@ parser.add_argument('--blackpoint', nargs='+', default=14, type=int,
 parser.add_argument('--pixel', default=0.005, type=float, help="percentage of pixel darker than blackpoint")
 parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist'], 
                               help='sample mode: "smooth", "smoother", or "hist"')
-parser.add_argument('--gamma', nargs='+', type=float, default=1.0, 
+parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
                                help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
 parser.add_argument('--folder', default='.')
 parser.add_argument('--prefix', default='Magazin')
