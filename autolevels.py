@@ -1,10 +1,9 @@
 from pathlib import Path
-from PIL import Image
-from PIL import ImageFilter
-import numpy as np
 from shutil import copy2
+from PIL import Image, ImageFilter, ImageEnhance
 from argparse import ArgumentParser
-from glob import glob
+
+import numpy as np
 
 
 parser = ArgumentParser(description='Set proper blackpoint for each image channel')
@@ -15,6 +14,7 @@ parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hi
                               help='sample mode: "smooth", "smoother", or "hist"')
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
                                help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
+parser.add_argument('--saturation', default=1, type=float)
 parser.add_argument('--folder', default='.')
 parser.add_argument('--prefix', default='Magazin')
 parser.add_argument('--magazine', default=1)
@@ -30,6 +30,7 @@ thr_pixel = float(arg.pixel)
 sample_mode = arg.mode
 assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
 gamma = 1 / np.array(arg.gamma, dtype=float)
+saturation = arg.saturation
 
 path = Path(arg.folder)
 if arg.files:
@@ -71,10 +72,30 @@ def get_blackpoint(img, mode='smooth', thr_pixel=0.002):
         return np.array(blackpoint)
 
 
+def blend(a, b, alpha=1.0):
+    "Interpolate between arrays `a`and `b`"
+    return a if (alpha == 1) else alpha * a + (1.0 - alpha) * b
+
+
+def grayscale(rgb, mode='itu', keep_channels=False):
+    "Convert RGB image (float array) to L"
+    print(rgb.shape)
+    R, G, B = (rgb[:, :, c] for c in range(3))
+
+    if mode == 'itu':
+        # Rec. ITU-R BT.601-7 definition of luminance
+        L = R * 0.299 + G * 0.587 + B * 0.114
+    else:
+        raise ValueError(f"mode {mode} not supported")
+
+    return np.stack([L, L, L]) if keep_channels else L[:, :, None]
+
+
 for fn in fns:
     out_fn = fn.parent / (fn.stem + '_al' + fn.suffix)
 
     img = Image.open(fn)
+
     blackpoint = get_blackpoint(img, sample_mode, thr_pixel)
 
     if (blackpoint < thr_black).all() and (gamma == 1).all():
@@ -90,6 +111,12 @@ for fn in fns:
     stretch_factor = whitepoint / (whitepoint - shift)
     array = np.array(img, dtype=np.float64)
     array = (array - shift) * stretch_factor
+
+    # Adjust saturation
+    if saturation != 1:
+        L = grayscale(array)
+        array = blend(array, L, saturation)
+
     array = array.clip(0, 255)
     #print("normalized array:", array.min(axis=(0, 1)), array.max(axis=(0, 1)))
     
