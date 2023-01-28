@@ -8,9 +8,11 @@ from glob import glob
 
 
 parser = ArgumentParser(description='Set proper blackpoint for each image channel')
-parser.add_argument('--blackpoint', nargs='+', default=14, help="target for soft blackpoint")
-parser.add_argument('--pixel', default=0.005, help="percentage of pixel darker than blackpoint")
-parser.add_argument('--mode', default='hist', help='sample mode: "smooth", "smoother", or "hist"')
+parser.add_argument('--blackpoint', nargs='+', default=14, type=int, 
+                                    help="Target for soft blackpoint, 1 luminance or 3 RGB values, range 0...255")
+parser.add_argument('--pixel', default=0.005, type=float, help="percentage of pixel darker than blackpoint")
+parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist'], 
+                              help='sample mode: "smooth", "smoother", or "hist"')
 parser.add_argument('--gamma', nargs='+', type=float, default=1.0, 
                                help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
 parser.add_argument('--folder', default='.')
@@ -49,14 +51,14 @@ def get_blackpoint(img, mode='smooth', thr_pixel=0.002):
 
     if mode.startswith('smooth'):
         img = img.filter(SMOOTH)
-        array = np.array(smoothened)  # HWC
+        array = np.array(img)  # HWC
         return array.min(axis=(0, 1))
 
     elif mode.startswith('hist'):
         channels = img.split()
         n_pixel = img.height * img.width
         blackpoint = []
-        
+
         for c in channels:
             hist = c.histogram()
             accsum = 0
