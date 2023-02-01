@@ -33,6 +33,7 @@ gamma = 1 / np.array(arg.gamma, dtype=float)
 saturation = arg.saturation
 
 path = Path(arg.folder)
+assert path.exists(), f'Folder "{path}" does not exist.'
 if arg.files:
     fns = []
     for x in arg.files:
@@ -45,6 +46,7 @@ else:
     sep = arg.separator
     fns = [path / f'{pre}{m}{sep}{i}.jpg' for m, i in zip(magazines, indices)]
 
+assert fns, f"No matching files found in {path}."
 
 def get_blackpoint(img, mode='smooth', thr_pixel=0.002):
     # 3x3 or 5x5 envelope
@@ -117,10 +119,10 @@ for fn in fns:
         array = blend(array, L, saturation)
 
     array = array.clip(0, 255)
-    #print("normalized array:", array.min(axis=(0, 1)), array.max(axis=(0, 1)))
     
     # Gamma correction
     if (gamma != 1).any():
+        array = array.clip(0, None)
         array = 255 * np.power(array / 255, gamma)
 
     img = Image.fromarray(np.uint8(array))
