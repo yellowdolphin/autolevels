@@ -81,11 +81,13 @@ def blend(a, b, alpha=1.0):
 
 def grayscale(rgb, mode='itu', keep_channels=False):
     "Convert RGB image (float array) to L"
-    R, G, B = (rgb[:, :, c] for c in range(3))
 
     if mode == 'itu':
         # Rec. ITU-R BT.601-7 definition of luminance
+        R, G, B = (rgb[:, :, c] for c in range(3))
         L = R * 0.299 + G * 0.587 + B * 0.114
+    elif mode == 'mean':
+        L = rgb.mean(axis=2)
     else:
         raise ValueError(f"mode {mode} not supported")
 
