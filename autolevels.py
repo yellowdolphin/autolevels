@@ -9,9 +9,9 @@ import numpy as np
 parser = ArgumentParser(description='Set proper blackpoint for each image channel')
 parser.add_argument('--blackpoint', nargs='+', default=14, type=int, 
                                     help="Target for soft blackpoint, 1 luminance or 3 RGB values, range 0...255")
-parser.add_argument('--pixel', default=0.005, type=float, help="percentage of pixel darker than blackpoint")
+parser.add_argument('--pixel', default=0.005, type=float, help="Percentage of pixel darker than blackpoint")
 parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist'], 
-                              help='sample mode: "smooth", "smoother", or "hist"')
+                              help='Blackpoint sample mode: "smooth", "smoother", or "hist"')
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
                                help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
 parser.add_argument('--saturation', default=1, type=float)
@@ -20,8 +20,11 @@ parser.add_argument('--prefix', default='Magazin')
 parser.add_argument('--magazine', default=1)
 parser.add_argument('--magazines', nargs='+', default=None)
 parser.add_argument('--indices', nargs='*')
-parser.add_argument('--separator', default='.', help='magazine/index separator')
-parser.add_argument('files', nargs='*', action="store", help='file names')
+parser.add_argument('--separator', default='.', help='Magazine/index separator')
+parser.add_argument('--outdir', default=None, help='Write output files here (default: original folder)')
+parser.add_argument('--outsuffix', default='_al', 
+                                   help='Append OUTSUFFIX to original file name (overwrite existing files)')
+parser.add_argument('files', nargs='*', action="store", help='File names to process (supports glob patterns)')
 
 arg = parser.parse_args()
 
@@ -47,6 +50,10 @@ else:
     fns = [path / f'{pre}{m}{sep}{i}.jpg' for m, i in zip(magazines, indices)]
 
 assert fns, f"No matching files found in {path}."
+
+outdir = Path(arg.outdir) if arg.outdir else None
+if outdir:
+    outdir.mkdir(exist_ok=True)
 
 def get_blackpoint(img, mode='smooth', thr_pixel=0.002):
     # 3x3 or 5x5 envelope
@@ -95,7 +102,7 @@ def grayscale(rgb, mode='itu', keep_channels=False):
 
 
 for fn in fns:
-    out_fn = fn.parent / (fn.stem + '_al' + fn.suffix)
+    out_fn = (outdir or fn.parent) / (fn.stem + arg.outsuffix + fn.suffix)
 
     img = Image.open(fn)
 
