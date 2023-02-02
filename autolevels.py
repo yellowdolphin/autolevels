@@ -11,7 +11,8 @@ import numpy as np
 parser = ArgumentParser(description='Set proper blackpoint for each image channel')
 parser.add_argument('--blackpoint', nargs='+', default=14, type=int, 
                                     help="Target for soft blackpoint, 1 luminance or 3 RGB values, range 0...255")
-parser.add_argument('--pixel', default=0.005, type=float, help="Percentage of pixel darker than blackpoint")
+parser.add_argument('--pixel', nargs='+', default=0.005, type=float, 
+                               help="Percentage of pixel darker than blackpoint")
 parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist'], 
                               help='Blackpoint sample mode: "smooth", "smoother", or "hist"')
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
@@ -31,7 +32,7 @@ parser.add_argument('files', nargs='*', action="store", help='File names to proc
 arg = parser.parse_args()
 
 thr_black = np.array(arg.blackpoint, dtype=int)
-thr_pixel = float(arg.pixel)
+thr_pixel = np.array(arg.pixel, dtype=float)
 sample_mode = arg.mode
 assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
 gamma = 1 / np.array(arg.gamma, dtype=float)
@@ -57,7 +58,7 @@ outdir = Path(arg.outdir) if arg.outdir else None
 if outdir:
     outdir.mkdir(exist_ok=True)
 
-def get_blackpoint(img, mode='smooth', thr_pixel=0.002):
+def get_blackpoint(img, mode, thr_pixel):
     # 3x3 or 5x5 envelope
     SMOOTH = ImageFilter.SMOOTH_MORE if mode == 'smoother' else ImageFilter.SMOOTH
 
@@ -68,15 +69,16 @@ def get_blackpoint(img, mode='smooth', thr_pixel=0.002):
 
     elif mode.startswith('hist'):
         channels = img.split()
+        thr_pixel = thr_pixel if thr_pixel.shape == (3,) else thr_pixel.repeat(len(channels))
         n_pixel = img.height * img.width
         blackpoint = []
 
-        for c in channels:
-            hist = c.histogram()
+        for thr, channel in zip(thr_pixel, channels):
+            hist = channel.histogram()
             accsum = 0
             for x in range(256):
                 accsum += hist[x]
-                if accsum > n_pixel * thr_pixel:
+                if accsum > n_pixel * thr:
                     break
             blackpoint.append(x)
 
