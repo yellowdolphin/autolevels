@@ -8,11 +8,17 @@ from argparse import ArgumentParser
 import numpy as np
 
 
+KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
+
 parser = ArgumentParser(description='Set proper blackpoint for each image channel')
 parser.add_argument('--blackpoint', nargs='+', default=14, type=int, 
-                                    help="Target for soft blackpoint, 1 luminance or 3 RGB values, range 0...255")
-parser.add_argument('--pixel', nargs='+', default=0.005, type=float, 
-                               help="Percentage of pixel darker than blackpoint")
+                                    help="Target for soft blackpoint, 1 luminance or 3 RGB values, range 0...255, default 14")
+parser.add_argument('--whitepoint', nargs='+', default=None, type=int, 
+                                    help="Target for soft whitepoint, 1 luminance or 3 RGB values, range 0...255, default: keep")
+parser.add_argument('--blackpixel', nargs='+', default=0.005, type=float, 
+                                    help="Percentage of pixels darker than blackpoint")
+parser.add_argument('--whitepixel', nargs='+', default=0.001, type=float,
+                                    help="Percentage of pixels brighter than whitepoint")
 parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist'], 
                               help='Blackpoint sample mode: "smooth", "smoother", or "hist"')
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
@@ -32,7 +38,9 @@ parser.add_argument('files', nargs='*', action="store", help='File names to proc
 arg = parser.parse_args()
 
 thr_black = np.array(arg.blackpoint, dtype=int)
-thr_pixel = np.array(arg.pixel, dtype=float)
+black_pixel = np.array(arg.blackpixel, dtype=float)
+thr_white = np.array(arg.whitepoint, dtype=int) if arg.whitepoint else None
+white_pixel = np.array(arg.whitepixel, dtype=float)
 sample_mode = arg.mode
 assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
 gamma = 1 / np.array(arg.gamma, dtype=float)
@@ -58,31 +66,42 @@ outdir = Path(arg.outdir) if arg.outdir else None
 if outdir:
     outdir.mkdir(exist_ok=True)
 
-def get_blackpoint(img, mode, thr_pixel):
+
+def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
     # 3x3 or 5x5 envelope
     SMOOTH = ImageFilter.SMOOTH_MORE if mode == 'smoother' else ImageFilter.SMOOTH
 
     if mode.startswith('smooth'):
         img = img.filter(SMOOTH)
         array = np.array(img)  # HWC
-        return array.min(axis=(0, 1))
+        return array.min(axis=(0, 1)), array.max(axis=(0, 1))
 
     elif mode.startswith('hist'):
         channels = img.split()
-        thr_pixel = thr_pixel if thr_pixel.shape == (3,) else thr_pixel.repeat(len(channels))
+        pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(len(channels))
+        pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(len(channels))
+        
         n_pixel = img.height * img.width
-        blackpoint = []
+        blackpoint, whitepoint = [], []
 
-        for thr, channel in zip(thr_pixel, channels):
+        for pix_black, pix_white, channel in zip(pixel_black, pixel_white, channels):
             hist = channel.histogram()
+
             accsum = 0
             for x in range(256):
                 accsum += hist[x]
-                if accsum > n_pixel * thr:
+                if accsum > n_pixel * pix_black:
                     break
             blackpoint.append(x)
 
-        return np.array(blackpoint)
+            accsum = 0
+            for x in range(255, -1, -1):
+                accsum += hist[x]
+                if accsum > n_pixel * pix_white:
+                    break
+            whitepoint.append(x)
+
+        return np.array(blackpoint), np.array(whitepoint)
 
 
 def blend(a, b, alpha=1.0):
@@ -110,19 +129,24 @@ for fn in fns:
 
     img = Image.open(fn)
 
-    blackpoint = get_blackpoint(img, sample_mode, thr_pixel)
+    blackpoint, whitepoint = get_blackpoint_whitepoint(img, sample_mode, black_pixel, white_pixel)
 
-    if (blackpoint < thr_black).all() and (gamma == 1).all():
+    if (blackpoint < thr_black).all() and (whitepoint < (thr_white or 256)).all() and (gamma == 1).all():
         #copy2(fn, ou_fn)
         #print(f"{fn} -> {out_fn} (no change)")
-        print(f"skipping {fn} (blackpoint OK)")
+        print(f"skipping {fn} (black and white points are OK)")
         continue
 
-    # Set black point to min(thr_black, blackpoint), preserve white point
+    # Set black point to min(thr_black, blackpoint).
     black = np.minimum(thr_black, blackpoint)
-    whitepoint = np.array([255, 255, 255])
-    shift = (blackpoint - black) * whitepoint / (whitepoint - black)
-    stretch_factor = whitepoint / (whitepoint - shift)
+
+    # Set white point to max(thr_white, whitepoint) or preserve it.
+    if KEEP_WHITE and (thr_white is None):
+        whitepoint = np.array([255, 255, 255])
+    white = whitepoint if thr_white is None else np.maximum(thr_white, whitepoint)
+
+    shift = (blackpoint - black) * white / (white - black)
+    stretch_factor = white / (whitepoint - shift)
     array = np.array(img, dtype=np.float64)
     array = (array - shift) * stretch_factor
 
@@ -145,6 +169,6 @@ for fn in fns:
     #print("black:", black, "shift:", blackpoint - black, "stretch:", stretch_factor)
     #print(f"smoothened blackpoint {blackpoint} -> {new_blackpoint}")
     #print(f"smoothened whitepoint {whitepoint} -> {new_whitepoint}")
-    print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {thr_black})")
+    print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {black}, whitepoint: {whitepoint} -> {white})")
     img.save(out_fn)
     #print()
