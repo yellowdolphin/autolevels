@@ -181,12 +181,14 @@ for fn in fns:
         array = 255 * np.power(array / 255, gamma)
 
     img = Image.fromarray(np.uint8(array))
-    #smoothened = img.filter(SMOOTH)
-    #new_blackpoint = np.amin(smoothened, axis=(0, 1))
-    #new_whitepoint = np.amax(smoothened, axis=(0, 1))
-    #print("black:", black, "shift:", blackpoint - black, "stretch:", stretch_factor)
-    #print(f"smoothened blackpoint {blackpoint} -> {new_blackpoint}")
-    #print(f"smoothened whitepoint {whitepoint} -> {new_whitepoint}")
-    print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {black}, whitepoint: {whitepoint} -> {white})")
     img.save(out_fn)
-    #print()
+
+    # Logging
+    infos = [f'{fn} -> {out_fn}']
+    if (blackpoint != black).any():
+        low = 'low-' if (blackpoint > max_black).any() else ''
+        infos.append(f'{low}blackpoint {blackpoint} -> {black}')
+    if (whitepoint != white).any():
+        high = 'high' if (whitepoint < min_white).any() else ''
+        infos.append(f'{high}whitepoint {whitepoint} -> {white}')
+    print(', '.join(infos))
