@@ -196,7 +196,7 @@ for fn in fns:
     target_white = np.array(arg.whitepoint, dtype=int) if arg.whitepoint else None
     if (blackpoint > max_black).any():
         target_black = np.maximum(target_black, blackpoint - constant_black)
-    if (whitepoint < min_white).any():
+    if (whitepoint < min_white).any() and arg.whitepoint:
         target_white = np.minimum(target_white, whitepoint - constant_white)
 
     # Set blackpoint to min(target_black, blackpoint).
