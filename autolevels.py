@@ -146,9 +146,9 @@ for fn in fns:
     target_black = np.array(arg.blackpoint, dtype=int)
     target_white = np.array(arg.whitepoint, dtype=int) if arg.whitepoint else None
     if (blackpoint > max_black).any():
-        target_black = constant_black
+        target_black = np.maximum(target_black, blackpoint - constant_black)
     if (whitepoint < min_white).any():
-        target_white = constant_white
+        target_white = np.minimum(target_white, whitepoint - constant_white)
 
     # Set blackpoint to min(target_black, blackpoint).
     black = np.minimum(target_black, blackpoint)
@@ -186,9 +186,9 @@ for fn in fns:
     # Logging
     infos = [f'{fn} -> {out_fn}']
     if (blackpoint != black).any():
-        low = 'low-' if (blackpoint > max_black).any() else ''
-        infos.append(f'{low}blackpoint {blackpoint} -> {black}')
+        high = 'high ' if (blackpoint > max_black).any() else ''
+        infos.append(f'{high}blackpoint {blackpoint} -> {black}')
     if (whitepoint != white).any():
-        high = 'high' if (whitepoint < min_white).any() else ''
-        infos.append(f'{high}whitepoint {whitepoint} -> {white}')
+        low = 'low ' if (whitepoint < min_white).any() else ''
+        infos.append(f'{low}whitepoint {whitepoint} -> {white}')
     print(', '.join(infos))
