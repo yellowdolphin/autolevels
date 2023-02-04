@@ -71,7 +71,7 @@ else:
     sep = arg.separator
     fns = [path / f'{pre}{m}{sep}{i}.jpg' for m, i in zip(magazines, indices)]
 
-assert fns, f"No matching files found in {path}."
+assert fns, f'No matching files found in "{path}".'
 
 outdir = Path(arg.outdir) if arg.outdir else None
 if outdir and not arg.simulate:
