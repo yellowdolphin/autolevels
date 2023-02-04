@@ -33,6 +33,7 @@ parser.add_argument('--separator', default='.', help='Magazine/index separator')
 parser.add_argument('--outdir', default=None, help='Write output files here (default: original folder)')
 parser.add_argument('--outsuffix', default='_al', 
                                    help='Append OUTSUFFIX to original file name (overwrite existing files)')
+parser.add_argument('--simulate', '--sandbox', action='store_true')
 parser.add_argument('files', nargs='*', action="store", help='File names to process (supports glob patterns)')
 
 arg = parser.parse_args()
@@ -63,7 +64,7 @@ else:
 assert fns, f"No matching files found in {path}."
 
 outdir = Path(arg.outdir) if arg.outdir else None
-if outdir:
+if outdir and not arg.simulate:
     outdir.mkdir(exist_ok=True)
 
 
@@ -144,6 +145,11 @@ for fn in fns:
     if KEEP_WHITE and (thr_white is None):
         whitepoint = np.array([255, 255, 255])
     white = whitepoint if thr_white is None else np.maximum(thr_white, whitepoint)
+
+    # Simulate: just print black and white points
+    if arg.simulate:
+        print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {black}, whitepoint: {whitepoint} -> {white})")
+        continue
 
     shift = (blackpoint - black) * white / (white - black)
     stretch_factor = white / (whitepoint - shift)
