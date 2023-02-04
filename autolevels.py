@@ -4,6 +4,7 @@ from pathlib import Path
 from shutil import copy2
 from PIL import Image, ImageFilter, ImageEnhance
 from argparse import ArgumentParser
+from time import perf_counter
 
 import numpy as np
 
@@ -27,8 +28,8 @@ parser.add_argument('--constant-blackshift', nargs='+', default=[27, 22, 28], ty
                                              help="blackpoint shift if MAXBLACK is exceeded")
 parser.add_argument('--constant-whiteshift', nargs='+', default=0, type=int,
                                              help="whitepoint shift if MINWHITE is not achieved")
-parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist'], 
-                              help='Blackpoint sample mode: "smooth", "smoother", or "hist"')
+parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist', 'perceptive'], 
+                              help='Blackpoint sample mode: "smooth", "smoother", "hist", or "perceptive"')
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
                                help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
 parser.add_argument('--saturation', default=1, type=float)
@@ -86,6 +87,54 @@ def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
         img = img.filter(SMOOTH)
         array = np.array(img, dtype=np.float32)  # HWC
         return array.min(axis=(0, 1)), array.max(axis=(0, 1))
+
+    elif mode.startswith('perceptive'):
+        assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
+        rgb = np.array(img, dtype=np.float32)
+        R, G, B = (rgb[:, :, c] for c in range(3))
+        L = R * 0.299 + G * 0.587 + B * 0.114
+        pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(3)
+        pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(3)
+        blackpoint, whitepoint = [], []
+        ts = [0, 0, 0]
+
+        for pix_black, pix_white, channel in zip(pixel_black, pixel_white, (R, G, B)):
+            assert (channel >= 0).all()
+            weight = np.where(channel >= L, np.array(1, dtype=np.float32), channel / L)
+            n_pixel = weight.sum()
+            zeros = np.zeros_like(weight)
+
+            accsum = 0
+            t0 = perf_counter()
+            for x in range(256):
+                # 1.3 sec
+                masked_weight = (channel == x) * weight
+                ts[0], t0 = ts[0] + perf_counter() - t0, perf_counter()
+
+                # 1.6 sec
+                #masked_weight = np.where(channel == x, weight, zeros)
+                #ts[1], t0 = ts[1] + perf_counter() - t0, perf_counter()
+
+                # 0.17 sec
+                accsum += masked_weight.sum()
+                ts[2], t0 = ts[2] + perf_counter() - t0, perf_counter()
+
+                if accsum > n_pixel * pix_black:
+                    break
+            blackpoint.append(x)
+
+            accsum = 0
+            for x in range(255, -1, -1):
+                mask = (channel == x)
+                masked_weight = mask * weight
+                accsum += (mask * weight).sum()
+                if accsum > n_pixel * pix_white:
+                    break
+            whitepoint.append(x)
+
+        for i, t in enumerate(ts):
+            print(f"timer {i}: {t}")
+        return np.array(blackpoint), np.array(whitepoint)
 
     elif mode.startswith('hist'):
         channels = img.split()
