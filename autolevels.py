@@ -19,6 +19,14 @@ parser.add_argument('--blackpixel', nargs='+', default=0.005, type=float,
                                     help="Percentage of pixels darker than blackpoint")
 parser.add_argument('--whitepixel', nargs='+', default=0.001, type=float,
                                     help="Percentage of pixels brighter than whitepoint")
+parser.add_argument('--maxblack', nargs='+', default=75, type=int,
+                                  help="Max allowed RGB value(s) for full blackpoint correction")
+parser.add_argument('--minwhite', nargs='+', default=240, type=int,
+                                  help="Min allowed RGB value(s) for full whitepoint correction")
+parser.add_argument('--constant-blackshift', nargs='+', default=[27, 22, 28], type=int,
+                                             help="blackpoint shift if MAXBLACK is exceeded")
+parser.add_argument('--constant-whiteshift', nargs='+', default=0, type=int,
+                                             help="whitepoint shift if MINWHITE is not achieved")
 parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist'], 
                               help='Blackpoint sample mode: "smooth", "smoother", or "hist"')
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
@@ -38,10 +46,12 @@ parser.add_argument('files', nargs='*', action="store", help='File names to proc
 
 arg = parser.parse_args()
 
-thr_black = np.array(arg.blackpoint, dtype=int)
 black_pixel = np.array(arg.blackpixel, dtype=float)
-thr_white = np.array(arg.whitepoint, dtype=int) if arg.whitepoint else None
+max_black = np.array(arg.maxblack, dtype=int)
+constant_black = np.array(arg.constant_blackshift, dtype=int)
 white_pixel = np.array(arg.whitepixel, dtype=float)
+min_white = np.array(arg.minwhite, dtype=int)
+constant_white = np.array(arg.constant_whiteshift, dtype=int)
 sample_mode = arg.mode
 assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
 gamma = 1 / np.array(arg.gamma, dtype=float)
@@ -132,19 +142,21 @@ for fn in fns:
 
     blackpoint, whitepoint = get_blackpoint_whitepoint(img, sample_mode, black_pixel, white_pixel)
 
-    if (blackpoint < thr_black).all() and (whitepoint < (thr_white or 256)).all() and (gamma == 1).all():
-        #copy2(fn, ou_fn)
-        #print(f"{fn} -> {out_fn} (no change)")
-        print(f"skipping {fn} (black and white points are OK)")
-        continue
+    # Set targets, limit shifts in black/whitepoint for low-contrast images
+    target_black = np.array(arg.blackpoint, dtype=int)
+    target_white = np.array(arg.whitepoint, dtype=int) if arg.whitepoint else None
+    if (blackpoint > max_black).any():
+        target_black = constant_black
+    if (whitepoint < min_white).any():
+        target_white = constant_white
 
-    # Set black point to min(thr_black, blackpoint).
-    black = np.minimum(thr_black, blackpoint)
+    # Set blackpoint to min(target_black, blackpoint).
+    black = np.minimum(target_black, blackpoint)
 
-    # Set white point to max(thr_white, whitepoint) or preserve it.
-    if KEEP_WHITE and (thr_white is None):
+    # Set whitepoint to max(target_white, whitepoint) or preserve it.
+    if KEEP_WHITE and (target_white is None):
         whitepoint = np.array([255, 255, 255])
-    white = whitepoint if thr_white is None else np.maximum(thr_white, whitepoint)
+    white = whitepoint if target_white is None else np.maximum(target_white, whitepoint)
 
     # Simulate: just print black and white points
     if arg.simulate:
