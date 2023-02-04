@@ -84,7 +84,7 @@ def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
 
     if mode.startswith('smooth'):
         img = img.filter(SMOOTH)
-        array = np.array(img)  # HWC
+        array = np.array(img, dtype=np.float32)  # HWC
         return array.min(axis=(0, 1)), array.max(axis=(0, 1))
 
     elif mode.startswith('hist'):
@@ -165,7 +165,7 @@ for fn in fns:
 
     shift = (blackpoint - black) * white / (white - black)
     stretch_factor = white / (whitepoint - shift)
-    array = np.array(img, dtype=np.float64)
+    array = np.array(img, dtype=np.float32)
     array = (array - shift) * stretch_factor
 
     # Adjust saturation
