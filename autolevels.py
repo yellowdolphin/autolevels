@@ -10,6 +10,7 @@ import numpy as np
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
+BENCHMARK = False
 
 parser = ArgumentParser(description='Set proper blackpoint for each image channel')
 parser.add_argument('--blackpoint', nargs='+', default=14, type=int, 
@@ -28,8 +29,8 @@ parser.add_argument('--max-blackshift', nargs='+', default=[27, 22, 28], type=in
                                         help="max blackpoint shift if MAXBLACK is exceeded")
 parser.add_argument('--max-whiteshift', nargs='+', default=0, type=int,
                                         help="max whitepoint shift if MINWHITE is not achieved")
-parser.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist', 'perceptive'], 
-                              help='Blackpoint sample mode: "smooth", "smoother", "hist", or "perceptive"')
+parser.add_argument('--mode', default='perceptive', choices=['smooth', 'smoother', 'hist', 'perceptive'], 
+                              help='Blackpoint sample mode: "smooth", "smoother", "hist", or "perceptive" (default)')
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
                                help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
 parser.add_argument('--saturation', default=1, type=float)
@@ -89,51 +90,44 @@ def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
         return array.min(axis=(0, 1)), array.max(axis=(0, 1))
 
     elif mode.startswith('perceptive'):
+        if BENCHMARK:
+            ts = [0, 0, 0, 0]
+            t0 = perf_counter()
         assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
-        rgb = np.array(img, dtype=np.float32)
-        R, G, B = (rgb[:, :, c] for c in range(3))
-        L = R * 0.299 + G * 0.587 + B * 0.114
+        R, G, B = (np.array(channel) for channel in img.split())  # 0.34 s
+        if BENCHMARK: ts[0], t0 = ts[0] + perf_counter() - t0, perf_counter()
+        L = np.array(img.convert(mode='L'))  # 0.05 s
+        if BENCHMARK: ts[1], t0 = ts[1] + perf_counter() - t0, perf_counter()
         pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(3)
         pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(3)
         blackpoint, whitepoint = [], []
-        ts = [0, 0, 0]
 
         for pix_black, pix_white, channel in zip(pixel_black, pixel_white, (R, G, B)):
-            assert (channel >= 0).all()
-            weight = np.where(channel >= L, np.array(1, dtype=np.float32), channel / L)
-            n_pixel = weight.sum()
-            zeros = np.zeros_like(weight)
+            weight = np.where(channel >= L, 1, channel / L)  # 0.26 s
+            if BENCHMARK: ts[2], t0 = ts[2] + perf_counter() - t0, perf_counter()
+            #assert (channel >= 0).all()  # 0.10 s
+            hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)  # 0.57 s
+            if BENCHMARK: ts[3], t0 = ts[3] + perf_counter() - t0, perf_counter()
+            n_pixel = hist.sum()
 
+            # the rest takes no time
             accsum = 0
-            t0 = perf_counter()
             for x in range(256):
-                # 1.3 sec
-                masked_weight = (channel == x) * weight
-                ts[0], t0 = ts[0] + perf_counter() - t0, perf_counter()
-
-                # 1.6 sec
-                #masked_weight = np.where(channel == x, weight, zeros)
-                #ts[1], t0 = ts[1] + perf_counter() - t0, perf_counter()
-
-                # 0.17 sec
-                accsum += masked_weight.sum()
-                ts[2], t0 = ts[2] + perf_counter() - t0, perf_counter()
-
+                accsum += hist[x]
                 if accsum > n_pixel * pix_black:
                     break
             blackpoint.append(x)
 
             accsum = 0
             for x in range(255, -1, -1):
-                mask = (channel == x)
-                masked_weight = mask * weight
-                accsum += (mask * weight).sum()
+                accsum += hist[x]
                 if accsum > n_pixel * pix_white:
                     break
             whitepoint.append(x)
 
-        #for i, t in enumerate(ts):
-        #    print(f"timer {i}: {t}")
+        if BENCHMARK: 
+            for i, t in enumerate(ts):
+                print(f"timer {i}: {t}")
 
         return np.array(blackpoint), np.array(whitepoint)
 
