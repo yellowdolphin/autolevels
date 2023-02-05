@@ -94,19 +94,19 @@ def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
             ts = [0, 0, 0, 0]
             t0 = perf_counter()
         assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
-        R, G, B = (np.array(channel) for channel in img.split())  # 0.34 s
+        R, G, B = (np.array(channel, dtype=np.float32) for channel in img.split())  # 0.37 s
         if BENCHMARK: ts[0], t0 = ts[0] + perf_counter() - t0, perf_counter()
-        L = np.array(img.convert(mode='L'))  # 0.05 s
+        L = np.array(img.convert(mode='L'), dtype=np.float32) + 1e-5  # 0.06 s
         if BENCHMARK: ts[1], t0 = ts[1] + perf_counter() - t0, perf_counter()
         pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(3)
         pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(3)
         blackpoint, whitepoint = [], []
 
         for pix_black, pix_white, channel in zip(pixel_black, pixel_white, (R, G, B)):
-            weight = np.where(channel >= L, 1, channel / L)  # 0.26 s
+            weight = np.where(channel >= L, 1, channel / L)  # 0.20 s
             if BENCHMARK: ts[2], t0 = ts[2] + perf_counter() - t0, perf_counter()
             #assert (channel >= 0).all()  # 0.10 s
-            hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)  # 0.57 s
+            hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)  # 0.49 s (0.58 with uint8)
             if BENCHMARK: ts[3], t0 = ts[3] + perf_counter() - t0, perf_counter()
             n_pixel = hist.sum()
 
