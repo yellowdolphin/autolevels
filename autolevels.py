@@ -206,7 +206,8 @@ for fn in fns:
 
     # Simulate: just print black and white points
     if arg.simulate:
-        print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {black}, whitepoint: {whitepoint} -> {white})")
+        print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {np.uint8(black)},", 
+              f"whitepoint: {whitepoint} -> {np.uint8(white)})")
         continue
 
     shift = (blackpoint - black) * white / (white - black)
@@ -233,8 +234,8 @@ for fn in fns:
     infos = [f'{fn} -> {out_fn}']
     if (blackpoint != black).any():
         high = 'high ' if (blackpoint > max_black).any() else ''
-        infos.append(f'{high}blackpoint {blackpoint} -> {black}')
+        infos.append(f'{high}blackpoint {blackpoint} -> {np.uint8(black)}')
     if (whitepoint != white).any():
         low = 'low ' if (whitepoint < min_white).any() else ''
-        infos.append(f'{low}whitepoint {whitepoint} -> {white}')
+        infos.append(f'{low}whitepoint {whitepoint} -> {np.uint8(white)}')
     print(', '.join(infos))
