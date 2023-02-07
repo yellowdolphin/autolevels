@@ -200,18 +200,22 @@ for fn in fns:
         target_white = np.minimum(target_white, whitepoint + shift)
 
     # Set blackpoint to min(target_black, blackpoint).
-    black = np.minimum(target_black, blackpoint)
+    target_black = np.minimum(target_black, blackpoint)
 
     # Set whitepoint to max(target_white, whitepoint) or preserve it.
     if KEEP_WHITE and (target_white is None):
         whitepoint = np.array([255, 255, 255])
-    white = whitepoint if target_white is None else np.maximum(target_white, whitepoint)
+    target_white = whitepoint if target_white is None else np.maximum(target_white, whitepoint)
 
     # Simulate: just print black and white points
     if arg.simulate:
-        print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {np.uint8(black)},", 
-              f"whitepoint: {whitepoint} -> {np.uint8(white)})")
+        print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {np.uint8(target_black)},", 
+              f"whitepoint: {whitepoint} -> {np.uint8(target_white)})")
         continue
+
+    # Make target black/white points gamma-agnostic
+    black = 255 * np.power(target_black / 255, 1 / gamma)
+    white = 255 * np.power(target_white / 255, 1 / gamma)
 
     shift = (blackpoint - black) * white / (white - black)
     stretch_factor = white / (whitepoint - shift)
@@ -235,10 +239,10 @@ for fn in fns:
 
     # Logging
     infos = [f'{fn} -> {out_fn}']
-    if (blackpoint != black).any():
+    if (blackpoint != target_black).any():
         high = 'high ' if (blackpoint > max_black).any() else ''
-        infos.append(f'{high}blackpoint {blackpoint} -> {np.uint8(black)}')
-    if (whitepoint != white).any():
+        infos.append(f'{high}blackpoint {blackpoint} -> {np.uint8(target_black)}')
+    if (whitepoint != target_white).any():
         low = 'low ' if (whitepoint < min_white).any() else ''
-        infos.append(f'{low}whitepoint {whitepoint} -> {np.uint8(white)}')
+        infos.append(f'{low}whitepoint {whitepoint} -> {np.uint8(target_white)}')
     print(', '.join(infos))
