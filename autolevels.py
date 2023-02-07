@@ -12,25 +12,25 @@ import numpy as np
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
 BENCHMARK = False
 
-parser = ArgumentParser(description='Set proper blackpoint for each image channel')
+parser = ArgumentParser(description='AutoLevels: batch image processing with common corrections')
 parser.add_argument('--blackpoint', nargs='+', default=14, type=int, 
-                                    help="Target for soft blackpoint, 1 luminance or 3 RGB values, range 0...255, default 14")
+                                    help="Target black point, 1 luminance or 3 RGB values, range 0...255 (default: 14)")
 parser.add_argument('--whitepoint', nargs='+', default=None, type=int, 
-                                    help="Target for soft whitepoint, 1 luminance or 3 RGB values, range 0...255, default: keep")
-parser.add_argument('--blackpixel', nargs='+', default=0.005, type=float, 
-                                    help="Percentage of pixels darker than blackpoint")
+                                    help="Target white point, 1 luminance or 3 RGB values, range 0...255 (default: keep)")
+parser.add_argument('--blackpixel', nargs='+', default=0.002, type=float, 
+                                    help="Percentage of pixels darker than BLACKPOINT")
 parser.add_argument('--whitepixel', nargs='+', default=0.001, type=float,
-                                    help="Percentage of pixels brighter than whitepoint")
+                                    help="Percentage of pixels brighter than WHITEPOINT")
 parser.add_argument('--maxblack', nargs='+', default=75, type=int,
-                                  help="Max allowed RGB value(s) for full blackpoint correction")
+                                  help="Max allowed RGB value(s) for full black-point correction")
 parser.add_argument('--minwhite', nargs='+', default=240, type=int,
-                                  help="Min allowed RGB value(s) for full whitepoint correction")
+                                  help="Min allowed RGB value(s) for full white-point correction")
 parser.add_argument('--max-blackshift', nargs='+', default=[27, 22, 28], type=int,
-                                        help="max blackpoint shift if MAXBLACK is exceeded")
-parser.add_argument('--max-whiteshift', nargs='+', default=0, type=int,
-                                        help="max whitepoint shift if MINWHITE is not achieved")
+                                        help="max black-point shift if MAXBLACK is exceeded")
+parser.add_argument('--max-whiteshift', nargs='+', default=20, type=int,
+                                        help="max white-point shift if MINWHITE is not achieved")
 parser.add_argument('--mode', default='perceptive', choices=['smooth', 'smoother', 'hist', 'perceptive'], 
-                              help='Blackpoint sample mode: "smooth", "smoother", "hist", or "perceptive" (default)')
+                              help='Black/white point sample mode: "smooth", "smoother", "hist", or "perceptive" (default)')
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
                                help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
 parser.add_argument('--saturation', default=1, type=float)
