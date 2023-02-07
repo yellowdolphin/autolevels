@@ -193,6 +193,9 @@ for fn in fns:
         shift = max_blackshift * (255 - blackpoint) / (255 - max_blackshift)
         target_black = np.maximum(target_black, blackpoint - shift)
     if (whitepoint < min_white).any() and arg.whitepoint:
+        if np.var(max_whiteshift) == 0:
+            # avoid clipping to preserve hue + saturation of white point
+            max_whiteshift = np.minimum(max_whiteshift, (target_white - whitepoint).min())
         shift = max_whiteshift * whitepoint / (255 - max_whiteshift)
         target_white = np.minimum(target_white, whitepoint + shift)
 
