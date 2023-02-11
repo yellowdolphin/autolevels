@@ -34,6 +34,7 @@ parser.add_argument('--mode', default='perceptive', choices=['smooth', 'smoother
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
                                help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
 parser.add_argument('--saturation', default=1, type=float)
+parser.add_argument('--saturation-before-gamma', action='store_true', help="correct saturation before gamma (deprecated)")
 parser.add_argument('--folder', default='.')
 parser.add_argument('--prefix', default='Magazin')
 parser.add_argument('--magazine', default=1)
@@ -228,19 +229,30 @@ for fn in fns:
     stretch_factor = white / (whitepoint - shift)
     array = np.array(img, dtype=np.float32)
     array = (array - shift) * stretch_factor
+    #print(f"black: {black}, white: {white}")
+    #print(f"shift: {shift}, stretch_factor: {stretch_factor}, min: {array.min(axis=(0, 1))}, max: {array.max(axis=(0, 1))}")
+    if (shift < 0).any():
+        # small gamma results in a low blackpoint => upper limit for target_black!
+        channels = [name for name, s in zip('RGB', shift) if s < 0]
+        print(f"{fn} WARNING: lower black point or increase gamma for channel(s)", *channels)
 
-    # Adjust saturation
-    if saturation != 1:
+    # Adjust saturation (before gamma)
+    if (saturation != 1 and arg.saturation_before_gamma):
         L = grayscale(array)
         array = blend(array, L, saturation)
 
-    array = array.clip(0, 255)
-    
     # Gamma correction
     if (gamma != 1).any():
         array = array.clip(0, None)
         array = 255 * np.power(array / 255, gamma)
 
+    # Adjust saturation
+    if (saturation != 1 and not arg.saturation_before_gamma):
+        L = grayscale(array)
+        array = blend(array, L, saturation)
+
+    array = array.clip(0, 255)
+    
     img = Image.fromarray(np.uint8(array))
     img.save(out_fn)
 
