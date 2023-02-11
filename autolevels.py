@@ -64,7 +64,14 @@ assert path.exists(), f'Folder "{path}" does not exist.'
 if arg.files:
     fns = []
     for x in arg.files:
-        fns.extend(sorted(path.glob(x)))
+        if x in '. .. \ /'.split():
+            print(f'Skipping "{x}"'); continue
+        try:
+            fns.extend(sorted(path.glob(x)))
+        except IndexError:
+            print("path:", path)
+            print("pattern:", x)
+            raise
 else:
     pre = arg.prefix
     indices = arg.indices
