@@ -48,10 +48,53 @@ parser.add_argument('--outdir', default=None, help='Write output files here (def
 parser.add_argument('--outsuffix', default='_al', 
                                    help='Append OUTSUFFIX to original file name (overwrite existing files)')
 parser.add_argument('--simulate', '--sandbox', action='store_true')
+parser.add_argument('--reproduce', default='', help="Specify earlier autolevels output, use same CLI options")
 parser.add_argument('files', nargs='*', action="store", help='File names to process (supports glob patterns)')
 
 arg = parser.parse_args()
 
+
+def extract_args(filename, parser):
+    "Extract args from a previous autolevel output file"
+
+    old_namespace = parser.parse_args()
+
+    filename = Path(filename)
+    assert filename.exists(), f'No file {filename}'
+
+    img = Image.open(filename)
+
+    cli_params = ''
+    parse_exif = False
+
+    # parse JPEG comment
+    if hasattr(img, 'info') and 'comment' in img.info:
+        comment = img.info['comment'].decode()
+        comment = comment.split('\n')[-1]  # multiline: read only last
+        if 'autolevels ' in comment:
+            version = comment.split('autolevels ')[1].split(',')[0]
+            if version != __version__:
+                print(f"WARNING: autolevels version changed: {version} -> {__version__}")
+            if 'see EXIF tag' in comment:
+                parse_exif = True  # tag 305 contains only CLI params
+            else:
+                cli_params += comment.split('params: ')[1]
+
+    # parse EXIF tag "Software"
+    exif = img.getexif() if parse_exif else None
+    if exif and 305 in exif:
+        cli_params += exif[305]
+
+    # parse CLI args
+    new_namespace = parser.parse_args(cli_params.split())
+    new_namespace.files = old_namespace.files
+    new_namespace.cli_params = cli_params
+    return new_namespace
+
+
+# post-process arg
+if arg.reproduce:
+    arg = extract_args(arg.reproduce, parser)
 black_pixel = np.array(arg.blackpixel, dtype=float)
 max_black = np.array(arg.maxblack, dtype=int)
 max_blackshift = np.array(arg.max_blackshift, dtype=int)
