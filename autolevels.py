@@ -1,16 +1,19 @@
 #!/home/wanko/miniconda3/bin/python
+__version__ = '0.1.0'
 
 from pathlib import Path
 from shutil import copy2
 from PIL import Image, ImageFilter, ImageEnhance
 from argparse import ArgumentParser
 from time import perf_counter
+import sys
 
 import numpy as np
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
 BENCHMARK = False
+DEFAULT_QUALITY = 75
 
 parser = ArgumentParser(description='AutoLevels: batch image processing with common corrections')
 parser.add_argument('--blackpoint', nargs='+', default=14, type=int, 
@@ -187,6 +190,27 @@ def grayscale(rgb, mode='itu', keep_channels=False):
     return np.stack([L, L, L]) if keep_channels else L[:, :, None]
 
 
+def make_comment(img, version, exif, cli_params):
+    "Save program version and CLI parameters in JPEG comment or EXIF"
+
+    if hasattr(img, 'info') and 'comment' in img.info:
+        # keep existing comment
+        comment = img.info['comment'].decode()
+        comment += f'\nautolevels {version}'
+    else:
+        comment = f'autolevels {version}'
+
+    if exif and 305 in exif:
+        # append autolevels to "Software"
+        exif[305] += f'; autolevels {version}'
+        comment += ', params: ' + cli_params
+    else:
+        exif[305] = cli_params
+        comment += ', params: see EXIF tag 305 (Software)'
+
+    return comment
+
+
 for fn in fns:
     out_fn = (outdir or fn.parent) / (fn.stem + arg.outsuffix + fn.suffix)
 
@@ -252,9 +276,29 @@ for fn in fns:
         array = blend(array, L, saturation)
 
     array = array.clip(0, 255)
-    
-    img = Image.fromarray(np.uint8(array))
-    img.save(out_fn)
+
+    new_img = Image.fromarray(np.uint8(array))
+
+    # Add attributes required to preserve JPEG quality
+    for attr in 'format layer layers quantization'.split():
+        value = getattr(img, attr, None)
+        if value is not None:
+            setattr(new_img, attr, value)
+
+    # Add other attributes (obsolete?)
+    for attr in 'mode info'.split():
+        value = getattr(img, attr, None)
+        if value is not None:
+            setattr(new_img, attr, value)
+
+    quality = 'keep' if (img.format in {'JPEG'}) else DEFAULT_QUALITY
+    exif = img.getexif()
+
+    # Make reproducible, leave CLI args in EXIF (or comment)
+    cli_params = getattr(arg, 'cli_params', '') or ' '.join(sys.argv[1:]).split(' -- ')[0]
+    comment = make_comment(img, __version__, exif, cli_params)
+
+    new_img.save(out_fn, format=img.format, exif=exif, comment=comment, optimize=True, quality=quality)
 
     # Logging
     infos = [f'{fn} -> {out_fn}']
