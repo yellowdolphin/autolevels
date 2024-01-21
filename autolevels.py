@@ -4,6 +4,7 @@ __version__ = '0.1.0'
 from pathlib import Path
 from shutil import copy2
 from PIL import Image, ImageFilter, ImageEnhance
+import piexif
 from argparse import ArgumentParser
 from time import perf_counter
 import sys
@@ -65,7 +66,6 @@ def extract_args(filename, parser):
     img = Image.open(filename)
 
     cli_params = ''
-    parse_exif = False
 
     # parse JPEG comment
     if hasattr(img, 'info') and 'comment' in img.info:
@@ -75,15 +75,7 @@ def extract_args(filename, parser):
             version = comment.split('autolevels ')[1].split(',')[0]
             if version != __version__:
                 print(f"WARNING: autolevels version changed: {version} -> {__version__}")
-            if 'see EXIF tag' in comment:
-                parse_exif = True  # tag 305 contains only CLI params
-            else:
-                cli_params += comment.split('params: ')[1]
-
-    # parse EXIF tag "Software"
-    exif = img.getexif() if parse_exif else None
-    if exif and 305 in exif:
-        cli_params += exif[305]
+            cli_params += comment.split('params: ')[1]
 
     # parse CLI args
     new_namespace = parser.parse_args(cli_params.split())
@@ -233,25 +225,17 @@ def grayscale(rgb, mode='itu', keep_channels=False):
     return np.stack([L, L, L]) if keep_channels else L[:, :, None]
 
 
-def make_comment(img, version, exif, cli_params):
+def make_comment(img, version, cli_params):
     "Save program version and CLI parameters in JPEG comment or EXIF"
 
+    comments = []
+
     if hasattr(img, 'info') and 'comment' in img.info:
-        # keep existing comment
-        comment = img.info['comment'].decode()
-        comment += f'\nautolevels {version}'
-    else:
-        comment = f'autolevels {version}'
+        comments.append(img.info['comment'].decode())
 
-    if exif and 305 in exif:
-        # append autolevels to "Software"
-        exif[305] += f'; autolevels {version}'
-        comment += ', params: ' + cli_params
-    else:
-        exif[305] = cli_params
-        comment += ', params: see EXIF tag 305 (Software)'
+    comments.append(f'autolevels {version}, params: {cli_params}')
 
-    return comment
+    return '\n'.join(comments)
 
 
 for fn in fns:
@@ -335,13 +319,16 @@ for fn in fns:
             setattr(new_img, attr, value)
 
     quality = 'keep' if (img.format in {'JPEG'}) else DEFAULT_QUALITY
-    exif = img.getexif()
 
-    # Make reproducible, leave CLI args in EXIF (or comment)
+    # Make reproducible, leave CLI args in JPEG comment
     cli_params = getattr(arg, 'cli_params', '') or ' '.join(sys.argv[1:]).split(' -- ')[0]
-    comment = make_comment(img, __version__, exif, cli_params)
+    comment = make_comment(img, __version__, cli_params)
 
-    new_img.save(out_fn, format=img.format, exif=exif, comment=comment, optimize=True, quality=quality)
+    new_img.save(out_fn, format=img.format, comment=comment, optimize=True, quality=quality)
+
+    # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
+    # Hence, this is the only way to fully preserve the entire EXIF:
+    piexif.transplant(str(fn), str(out_fn))
 
     # Logging
     infos = [f'{fn} -> {out_fn}']
