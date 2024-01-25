@@ -242,23 +242,25 @@ def make_comment(img, version, cli_params):
     return '\n'.join(comments)
 
 
+# TODO: implement batchwise inference on fns
+if arg.model:
+    # Free-curve correction from predicted curve
+    from inference import get_model, get_ensemble, free_curve_map_image
+
+    if len(arg.model) == 1:
+        model = get_model(arg.model[0])
+    else:
+        model = get_ensemble(arg.model)
+
+
 for fn in fns:
     out_fn = (outdir or fn.parent) / (fn.stem + arg.outsuffix + fn.suffix)
 
     img = Image.open(fn)
 
-    # TODO: implement batchwise inference on fns
     if arg.model:
-        # Free-curve correction from predicted curve
-        from inference import get_model, get_ensemble, free_curve_map_image
-
         array = np.array(img.resize((384, 384)), dtype=np.float32)
-        if len(arg.model) == 1:
-            model = get_model(arg.model[0])
-        else:
-            model = get_ensemble(arg.model)
         free_curve = model(array)
-        del model
         array = np.array(img)
         array = free_curve_map_image(array, free_curve)
 
