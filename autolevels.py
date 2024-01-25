@@ -350,7 +350,8 @@ for fn in fns:
 
     # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
     # Hence, this is the only way to fully preserve the entire EXIF:
-    piexif.transplant(str(fn), str(out_fn))
+    if hasattr(img, 'info') and 'exif' in img.info:
+        piexif.transplant(str(fn), str(out_fn))
 
     # Logging
     infos = [f'{fn} -> {out_fn}']
