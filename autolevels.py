@@ -343,7 +343,9 @@ for fn in fns:
     quality = 'keep' if (img.format in {'JPEG'}) else DEFAULT_QUALITY
 
     # Make reproducible, leave CLI args in JPEG comment
-    cli_params = getattr(arg, 'cli_params', '') or ' '.join(sys.argv[1:]).split(' -- ')[0]
+    cli_params = getattr(arg, 'cli_params', '') or ' '.join(sys.argv[1:])
+    if ' -- ' in cli_params:
+        cli_params = cli_params.split(' -- ')[0] + f' -- {fn.name}'
     comment = make_comment(img, __version__, cli_params)
 
     new_img.save(out_fn, format=img.format, comment=comment, optimize=True, quality=quality)
