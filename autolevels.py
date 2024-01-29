@@ -259,7 +259,7 @@ for fn in fns:
     img = Image.open(fn)
 
     if arg.model:
-        array = np.array(img.resize((384, 384)), dtype=np.float32)
+        array = np.array(img.resize(model.input_size), dtype=np.float32)
         free_curve = model(array)
         array = np.array(img)
         array = free_curve_map_image(array, free_curve)

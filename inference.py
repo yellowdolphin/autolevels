@@ -25,6 +25,15 @@ def get_model(filename):
 
             return preds
 
+        for size in (384, 512, 768, 1024, 448, 640):
+            input_shape = (1, 3, size, size)
+            try:
+                _ = scripted_model(torch.zeros(*input_shape, dtype=torch.float32))
+                break
+            except RuntimeError:
+                pass
+        model.input_size = input_shape[2:4]
+
         return model
 
     elif Path(filename).suffix in ['.keras', '.h5', '.tgz']:
@@ -59,12 +68,18 @@ def get_model(filename):
             preds = np.clip(preds, 0, 1)
 
             return preds
+        model.input_size = getattr(tf_model, 'input_shape', (None, 384, 384, 3))[1:3]
         
         return model
 
 
 def get_ensemble(filenames):
     models = [get_model(fn) for fn in filenames]
+    input_size = [m.input_size for m in models]
+    if all(s == input_size[0] for s in input_size):
+        input_size = input_size[0]
+    else:
+        raise NotImplementedError(f'Models have different input sizes: {", ".join(str(s) for s in input_size)}')
 
     def ensemble(inputs):
         model_preds = np.stack([model(inputs) for model in models], axis=0)
@@ -75,6 +90,7 @@ def get_ensemble(filenames):
         #preds = preds.reshape(preds.shape[0], 768)
 
         return preds
+    ensemble.input_size = input_size
 
     return ensemble
 
