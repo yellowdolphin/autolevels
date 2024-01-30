@@ -18,23 +18,30 @@ DEFAULT_QUALITY = 75
 
 parser = ArgumentParser(description='AutoLevels: batch image processing with common corrections')
 parser.add_argument('--blackpoint', nargs='+', default=14, type=int, 
-                                    help="Target black point, 1 luminance or 3 RGB values, range 0...255 (default: 14)")
+                                    help="Target black point, one L or three RGB values, range 0...255 (default: 14)")
 parser.add_argument('--whitepoint', nargs='+', default=None, type=int, 
-                                    help="Target white point, 1 luminance or 3 RGB values, range 0...255 (default: keep)")
-parser.add_argument('--blackpixel', nargs='+', default=0.002, type=float, 
-                                    help="Percentage of pixels darker than BLACKPOINT")
-parser.add_argument('--whitepixel', nargs='+', default=0.001, type=float,
-                                    help="Percentage of pixels brighter than WHITEPOINT")
+                                    help="Target white point, one L or three RGB values, range 0...255 (default: keep)")
+
+# Clip shadows and highlights (adobe auto color defaults are between 0.001 and 0.005)
+parser.add_argument('--blackclip', '--blackpixel', nargs='+', default=0.002, type=float, 
+                                                 help="Percentage of pixels darker than black point (shadows clipped)")
+parser.add_argument('--whiteclip', '--whitepixel', nargs='+', default=0.001, type=float,
+                                                 help="Percentage of pixels brighter than white point (highlights clipped)")
+
+# If the image is low in contrast, limit the correction of shadows and highlights
 parser.add_argument('--maxblack', nargs='+', default=75, type=int,
-                                  help="Max allowed RGB value(s) for full black-point correction")
+                                  help="Max allowed L or RGB value(s) for full black-point correction")
 parser.add_argument('--minwhite', nargs='+', default=240, type=int,
-                                  help="Min allowed RGB value(s) for full white-point correction")
+                                  help="Min allowed L or RGB value(s) for full white-point correction")
 parser.add_argument('--max-blackshift', nargs='+', default=[27, 22, 28], type=int,
                                         help="max black-point shift if MAXBLACK is exceeded")
 parser.add_argument('--max-whiteshift', nargs='+', default=20, type=int,
                                         help="max white-point shift if MINWHITE is not achieved")
+
+# Mode for determining the black- and whitepoint
 parser.add_argument('--mode', default='perceptive', choices=['smooth', 'smoother', 'hist', 'perceptive'], 
                               help='Black/white point sample mode: "smooth", "smoother", "hist", or "perceptive" (default)')
+
 parser.add_argument('--gamma', nargs='+', type=float, default=[1.0], 
                                help='Gamma correction with inverse gamma (larger=brighter), 1 global or 3 RGB values')
 parser.add_argument('--model', nargs='+', action="store", help="Model file(s) for free-curve correction")
@@ -88,10 +95,10 @@ def extract_args(filename, parser):
 # post-process arg
 if arg.reproduce:
     arg = extract_args(arg.reproduce, parser)
-black_pixel = np.array(arg.blackpixel, dtype=float)
+blackclip = np.array(arg.blackclip, dtype=float)
 max_black = np.array(arg.maxblack, dtype=int)
 max_blackshift = np.array(arg.max_blackshift, dtype=int)
-white_pixel = np.array(arg.whitepixel, dtype=float)
+whiteclip = np.array(arg.whiteclip, dtype=float)
 min_white = np.array(arg.minwhite, dtype=int)
 max_whiteshift = np.array(arg.max_whiteshift, dtype=int)
 sample_mode = arg.mode
@@ -265,7 +272,7 @@ for fn in fns:
         array = free_curve_map_image(array, free_curve)
 
     else:
-        blackpoint, whitepoint = get_blackpoint_whitepoint(img, sample_mode, black_pixel, white_pixel)
+        blackpoint, whitepoint = get_blackpoint_whitepoint(img, sample_mode, blackclip, whiteclip)
 
         # Set targets, limit shifts in black/whitepoint for low-contrast images
         target_black = np.array(arg.blackpoint, dtype=int)
@@ -290,7 +297,7 @@ for fn in fns:
 
         # Simulate: just print black and white points
         if arg.simulate:
-            print(f"{fn} -> {out_fn} (blackpoint: {blackpoint} -> {np.uint8(target_black)},", 
+            print(f"{fn} -> {out_fn} (black point: {blackpoint} -> {np.uint8(target_black)},", 
                 f"whitepoint: {whitepoint} -> {np.uint8(target_white)})")
             continue
 
@@ -305,7 +312,7 @@ for fn in fns:
         #print(f"black: {black}, white: {white}")
         #print(f"shift: {shift}, stretch_factor: {stretch_factor}, min: {array.min(axis=(0, 1))}, max: {array.max(axis=(0, 1))}")
         if (shift < 0).any():
-            # small gamma results in a low blackpoint => upper limit for target_black!
+            # small gamma results in a low black point => upper limit for target_black!
             channels = [name for name, s in zip('RGB', shift) if s < 0]
             print(f"{fn} WARNING: lower black point or increase gamma for channel(s)", *channels)
 
@@ -359,8 +366,8 @@ for fn in fns:
     infos = [f'{fn} -> {out_fn}']
     if not arg.model and (blackpoint != target_black).any():
         high = 'high ' if (blackpoint > max_black).any() else ''
-        infos.append(f'{high}blackpoint {blackpoint} -> {np.uint8(target_black)}')
+        infos.append(f'{high}black point {blackpoint} -> {np.uint8(target_black)}')
     if not arg.model and (whitepoint != target_white).any():
         low = 'low ' if (whitepoint < min_white).any() else ''
-        infos.append(f'{low}whitepoint {whitepoint} -> {np.uint8(target_white)}')
+        infos.append(f'{low}white point {whitepoint} -> {np.uint8(target_white)}')
     print(', '.join(infos))
