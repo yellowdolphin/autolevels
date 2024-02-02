@@ -5,6 +5,14 @@ import os
 import numpy as np
 
 
+def monotonize(curves):
+    input_shape = curves.shape
+    curves = curves.reshape(3, 256)
+    for i in range(254, -1, -1):
+        curves[:, i] = np.min(curves[:, i:], axis=1)
+    return curves.reshape(input_shape)
+
+
 def get_model(filename):
     "Return a model that outputs a torch tensor with shape [N, 256, C]"
 
@@ -22,6 +30,7 @@ def get_model(filename):
 
             # post-process preds
             preds = np.clip(preds, 0, 1)
+            preds = monotonize(preds)
 
             return preds
 
@@ -66,10 +75,11 @@ def get_model(filename):
 
             # post-process preds
             preds = np.clip(preds, 0, 1)
+            preds = monotonize(preds)
 
             return preds
         model.input_size = getattr(tf_model, 'input_shape', (None, 384, 384, 3))[1:3]
-        
+
         return model
 
 
@@ -84,10 +94,6 @@ def get_ensemble(filenames):
     def ensemble(inputs):
         model_preds = np.stack([model(inputs) for model in models], axis=0)
         preds = np.mean(model_preds, axis=0)
-
-        # post-process preds
-        #preds = np.clip(preds, 0, 1)
-        #preds = preds.reshape(preds.shape[0], 768)
 
         return preds
     ensemble.input_size = input_size
