@@ -266,10 +266,19 @@ for fn in fns:
     img = Image.open(fn)
 
     if arg.model:
+        # Simulate: just test inference on first image
+        if arg.simulate and fn != fns[0]:
+            print(f"{fn} -> {out_fn}")
+            continue
+
         array = np.array(img.resize(model.input_size), dtype=np.float32)
         free_curve = model(array)
         array = np.array(img)
         array = free_curve_map_image(array, free_curve)
+
+        if arg.simulate:
+            print(f"{fn} -> {out_fn}")
+            continue
 
     else:
         blackpoint, whitepoint = get_blackpoint_whitepoint(img, sample_mode, blackclip, whiteclip)
