@@ -351,7 +351,7 @@ for fn in fns:
             setattr(new_img, attr, value)
 
     # Add other attributes (obsolete?)
-    for attr in 'mode info'.split():
+    for attr in 'info'.split():
         value = getattr(img, attr, None)
         if value is not None:
             setattr(new_img, attr, value)
