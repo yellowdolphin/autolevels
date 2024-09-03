@@ -48,6 +48,7 @@ def get_model(filename):
     elif Path(filename).suffix in ['.keras', '.h5', '.tgz']:
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
         import tensorflow as tf
+        import tf_keras
 
         remove_model_folder = False
         if Path(filename).suffix == '.tgz':
@@ -56,7 +57,7 @@ def get_model(filename):
             assert Path(filename).is_dir(), f'{filename}.tgz does not contain a folder {filename}'
             remove_model_folder = True
 
-        tf_model = tf.keras.models.load_model(filename)
+        tf_model = tf_keras.models.load_model(filename)
         """TF compatibility issues
             - full h5 is fast, small, and works with all versions (tested: 2.11 ... 2.15), but is "deprecated"
             - keras is superslow and broken with every other version (2.15 fails on 2.13 with ValueError)
