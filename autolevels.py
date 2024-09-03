@@ -114,7 +114,7 @@ assert path.exists(), f'Folder "{path}" does not exist.'
 if arg.files:
     fns = []
     for x in arg.files:
-        if x in '. .. \ /'.split():
+        if x in r'. .. \ /'.split():
             print(f'Skipping "{x}"'); continue
         try:
             fns.extend(sorted(path.glob(x)))
