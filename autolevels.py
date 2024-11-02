@@ -222,6 +222,10 @@ if arg.version:
     print(f"AutoLevels version {__version__}")
     exit()
 
+if not arg.files:
+    parser.print_usage()
+    exit("No files specified")
+
 # Post-process arg
 if arg.reproduce:
     extracted_arg = extract_arg(arg.reproduce, parser)
@@ -332,7 +336,7 @@ def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
 
         return np.array(blackpoint), np.array(whitepoint)
 
-    elif mode.startswith('hist'):
+    elif mode in {'hist', 'histogram'}:
         channels = img.split()
         pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(len(channels))
         pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(len(channels))
@@ -356,6 +360,25 @@ def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
                 if accsum > n_pixel * pix_white:
                     break
             whitepoint.append(x)
+
+        return np.array(blackpoint), np.array(whitepoint)
+
+    elif mode == 'hist2':
+        # Deprecated.
+        # More concise but not faster than hist (btw, np.percentile is 5 x times slower).
+        channels = img.split()
+        pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(len(channels))
+        pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(len(channels))
+
+        n_pixel = img.height * img.width
+        blackpoint, whitepoint = [], []
+
+        for pix_black, pix_white, channel in zip(pixel_black, pixel_white, channels):
+            hist = np.array(channel.histogram()) / n_pixel
+
+            cumsum = np.cumsum(hist)
+            blackpoint.append(np.argmax(cumsum > pix_black))
+            whitepoint.append(np.argmax(cumsum > (1 - pix_white)))
 
         return np.array(blackpoint), np.array(whitepoint)
 
