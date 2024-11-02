@@ -120,8 +120,6 @@ parser.add_argument('--version', action='store_true', help="Print version inform
 
 parser.add_argument('files', nargs='*', action="store", help=('Input files to process. Example: scans/IMG_*.jpg'))
 
-arg = parser.parse_args()
-
 
 def extract_arg(filename, parser):
     """Extract args from a previous autolevel output file"""
@@ -217,70 +215,6 @@ def evaluate_fstring(s: str, x):
     # Safely format the string using str.format
     result = formatted_str.format(x)
     return result
-
-if arg.version:
-    print(f"AutoLevels version {__version__}")
-    exit()
-
-if not arg.files:
-    parser.print_usage()
-    exit("No files specified")
-
-# Post-process arg
-if arg.reproduce:
-    extracted_arg = extract_arg(arg.reproduce, parser)
-    assert hasattr(extracted_arg, 'cli_params'), 'called extract_arg but arg has no cli_params'
-    arg = merge_args(current_arg=arg, extracted_arg=extracted_arg)
-    assert hasattr(arg, 'cli_params'), 'merge_args deleted cli_params'
-    print(f"Reproducing {arg.reproduce} processing: {arg.cli_params}")
-blackclip = np.array(arg.blackclip, dtype=float)
-max_black = np.array(arg.maxblack, dtype=int)
-max_blackshift = np.array(arg.max_blackshift, dtype=int)
-whiteclip = np.array(arg.whiteclip, dtype=float)
-min_white = np.array(arg.minwhite, dtype=int)
-max_whiteshift = np.array(arg.max_whiteshift, dtype=int)
-sample_mode = arg.mode
-assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
-gamma = 1 / np.array(arg.gamma, dtype=float)
-saturation = arg.saturation
-if arg.model:
-    for fn in arg.model:
-        assert Path(fn).exists(), f'Specified model file could not be found: {fn}'
-
-# Input file names
-path = Path(arg.folder)
-assert path.exists(), f'Folder "{path}" does not exist.'
-pre = arg.prefix
-assert not pre.startswith(('.', '/')), f'Unsecure prefix "{pre}", use --folder to specify the path'
-suf = arg.suffix
-
-if arg.fstring:
-    fns = [path / evaluate_fstring(arg.fstring, x) for x in arg.files]
-    # Check input files exist (fail early)
-    for fn in fns:
-        assert fn.exists(), f'File not found: {fn}'
-else:
-    # Use prefix, suffix, and shell/glob expansion
-    fns = []
-    for x in arg.files:
-        if x in {'.', '..', '/'}:
-            print(f'Skipping "{x}"'); continue
-        try:
-            stem, ext = Path(x).stem, Path(x).suffix
-            glob_pattern = f'{pre}{stem}{suf}{ext}'
-            #print("glob pattern:", glob_pattern)
-            fns.extend(sorted(path.glob(glob_pattern)))
-        except IndexError:
-            print("path:", path)
-            print("pattern:", x)
-            raise
-
-assert fns, f'No matching files found in "{path}"'
-
-# Output file options
-outdir = Path(arg.outdir) if arg.outdir else None
-if outdir and not arg.simulate:
-    outdir.mkdir(exist_ok=True)
 
 
 def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
@@ -441,176 +375,247 @@ def make_comment(img, version, cli_params):
     return '\n'.join(comments)
 
 
-# TODO: implement batchwise inference on fns
-if arg.model:
-    # Free-curve correction from predicted curve
-    from inference import get_model, get_ensemble, free_curve_map_image
+if __name__ == '__main__':
+    arg = parser.parse_args()
 
-    if len(arg.model) == 1:
-        model = get_model(arg.model[0])
-    else:
-        model = get_ensemble(arg.model)
+    if arg.version:
+        print(f"AutoLevels version {__version__}")
+        exit()
 
+    if not arg.files:
+        parser.print_usage()
+        exit("No files specified")
 
-for i, fn in enumerate(fns):
-    if arg.outfstring:
-        out_fn = (outdir or fn.parent) / evaluate_fstring(arg.outfstring, arg.files[i])
-    else:
-        stem, ext = fn.stem, fn.suffix
-        if arg.outprefix and arg.prefix:
-            stem = stem.replace(arg.prefix, arg.outprefix, 1)
-        if arg.outsuffix and arg.suffix:
-            # Find index where suffix starts so we can replace it
-            start = len(arg.outprefix or '')
-            start = fn.name.rfind(arg.suffix, start)
-            stem = stem[:start]  # strip arg.suffix
-            suf = arg.outsuffix
-        else:
-            suf = arg.outsuffix or f'_al{ext}'
-        out_fn = (outdir or fn.parent) / f'{stem}{suf}'
-
-    # TODO: check out_fn exists, add option -f to overwrite
-
-    img = Image.open(fn)
-
-    # Adjust saturation before anything else
-    if (saturation != 1 and arg.saturation_first):
-        array = np.array(img, dtype=np.float32)
-        L = grayscale(array)
-        array = blend(array, L, saturation)
-
+    # Post-process arg
+    if arg.reproduce:
+        extracted_arg = extract_arg(arg.reproduce, parser)
+        assert hasattr(extracted_arg, 'cli_params'), 'called extract_arg but arg has no cli_params'
+        arg = merge_args(current_arg=arg, extracted_arg=extracted_arg)
+        assert hasattr(arg, 'cli_params'), 'merge_args deleted cli_params'
+        print(f"Reproducing {arg.reproduce} processing: {arg.cli_params}")
+    blackclip = np.array(arg.blackclip, dtype=float)
+    max_black = np.array(arg.maxblack, dtype=int)
+    max_blackshift = np.array(arg.max_blackshift, dtype=int)
+    whiteclip = np.array(arg.whiteclip, dtype=float)
+    min_white = np.array(arg.minwhite, dtype=int)
+    max_whiteshift = np.array(arg.max_whiteshift, dtype=int)
+    sample_mode = arg.mode
+    assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
+    gamma = 1 / np.array(arg.gamma, dtype=float)
+    saturation = arg.saturation
     if arg.model:
-        # Simulate: just test inference on first image
-        if arg.simulate and fn != fns[0]:
-            print(f"{fn} -> {out_fn}")
-            continue
+        for fn in arg.model:
+            assert Path(fn).exists(), f'Specified model file could not be found: {fn}'
 
-        # Resize image for model input
-        if 'array' in globals():
-            array_8 = array.clip(0, 255).astype('uint8')
-            resized = Image.fromarray(array_8, mode=(img.mode or 'RGB')).resize(model.input_size)
-            quantization_noise = array_8.astype(np.float32) - array  # range: (-1, 0]
-            plus_one = np.clip(array + 1, 0, 255).astype('uint8')
+    # Input file names
+    path = Path(arg.folder)
+    assert path.exists(), f'Folder "{path}" does not exist.'
+    pre = arg.prefix
+    assert not pre.startswith(('.', '/')), f'Unsecure prefix "{pre}", use --folder to specify the path'
+    suf = arg.suffix
+
+    if arg.fstring:
+        fns = [path / evaluate_fstring(arg.fstring, x) for x in arg.files]
+        # Check input files exist (fail early)
+        for fn in fns:
+            assert fn.exists(), f'File not found: {fn}'
+    else:
+        # Use prefix, suffix, and shell/glob expansion
+        fns = []
+        for x in arg.files:
+            if x in {'.', '..', '/'}:
+                print(f'Skipping "{x}"'); continue
+            try:
+                parent, stem, ext = Path(x).parent, Path(x).stem, Path(x).suffix
+                #glob_pattern = f'{parent}/{pre}{stem}{suf}{ext}'
+                #print("glob pattern:", glob_pattern)
+                #fns.extend(sorted(path.glob(glob_pattern)))
+
+                # Skip glob expansion for now
+                fns.append(path / parent / f'{pre}{stem}{suf}{ext}')
+            except IndexError:
+                print("path:", path)
+                print("pattern:", x)
+                raise
+
+    assert fns, f'No matching files found in "{path}"'
+
+    # Output file options
+    outdir = Path(arg.outdir) if arg.outdir else None
+    if outdir and not arg.simulate:
+        outdir.mkdir(exist_ok=True)
+
+
+    # TODO: implement batchwise inference on fns
+    if arg.model:
+        # Free-curve correction from predicted curve
+        from inference import get_model, get_ensemble, free_curve_map_image
+
+        if len(arg.model) == 1:
+            model = get_model(arg.model[0])
         else:
-            array_8 = np.array(img)
-            resized = img.resize(model.input_size)
-            quantization_noise = None
+            model = get_ensemble(arg.model)
 
-        free_curve = model(np.array(resized, dtype=np.float32))
 
-        array = free_curve_map_image(array_8, free_curve)
+    for i, fn in enumerate(fns):
+        if arg.outfstring:
+            out_fn = (outdir or fn.parent) / evaluate_fstring(arg.outfstring, arg.files[i])
+        else:
+            stem, ext = fn.stem, fn.suffix
+            if arg.outprefix and arg.prefix:
+                stem = stem.replace(arg.prefix, arg.outprefix, 1)
+            if arg.outsuffix and arg.suffix:
+                # Find index where suffix starts so we can replace it
+                start = len(arg.outprefix or '')
+                start = fn.name.rfind(arg.suffix, start)
+                stem = stem[:start]  # strip arg.suffix
+                suf = arg.outsuffix
+            else:
+                suf = arg.outsuffix or f'_al{ext}'
+            out_fn = (outdir or fn.parent) / f'{stem}{suf}'
 
-        # Eliminate quantization noise
-        if quantization_noise is not None:
-            transformed_plus_one = free_curve_map_image(plus_one, free_curve)
-            transformed_noise = (transformed_plus_one - array) * quantization_noise  # negative
-            array -= transformed_noise
+        # TODO: check out_fn exists, add option -f to overwrite
 
-        if arg.simulate:
-            print(f"{fn} -> {out_fn}")
-            continue
+        img = Image.open(fn)
 
-    else:
-        blackpoint, whitepoint = get_blackpoint_whitepoint(img, sample_mode, blackclip, whiteclip)
-
-        # Set targets, limit shifts in black/whitepoint for low-contrast images
-        target_black = np.array(arg.blackpoint, dtype=int)
-        target_white = np.array(arg.whitepoint, dtype=int) if arg.whitepoint else None
-        if (blackpoint > max_black).any():
-            shift = max_blackshift * (255 - blackpoint) / (255 - max_blackshift)
-            target_black = np.maximum(target_black, blackpoint - shift)
-        if (whitepoint < min_white).any() and arg.whitepoint:
-            if np.var(max_whiteshift) == 0:
-                # avoid clipping to preserve hue + saturation of white point
-                max_whiteshift = np.minimum(max_whiteshift, (target_white - whitepoint).min())
-            shift = max_whiteshift * whitepoint / (255 - max_whiteshift)
-            target_white = np.minimum(target_white, whitepoint + shift)
-
-        # Set blackpoint to min(target_black, blackpoint).
-        target_black = np.minimum(target_black, blackpoint)
-
-        # Set whitepoint to max(target_white, whitepoint) or preserve it.
-        if KEEP_WHITE and (target_white is None):
-            whitepoint = np.array([255, 255, 255])
-        target_white = whitepoint if target_white is None else np.maximum(target_white, whitepoint)
-
-        # Simulate: just print black and white points
-        if arg.simulate:
-            print(f"{fn} -> {out_fn} (black point: {blackpoint} -> {np.uint8(target_black)},", 
-                f"whitepoint: {whitepoint} -> {np.uint8(target_white)})")
-            continue
-
-        # Make target black/white points gamma-agnostic
-        black = 255 * np.power(target_black / 255, 1 / gamma)
-        white = 255 * np.power(target_white / 255, 1 / gamma)
-
-        shift = (blackpoint - black) * white / (white - black)
-        stretch_factor = white / (whitepoint - shift)
-        if 'array' not in globals():
+        # Adjust saturation before anything else
+        if (saturation != 1 and arg.saturation_first):
             array = np.array(img, dtype=np.float32)
-        array = (array - shift) * stretch_factor
-        #print(f"black: {black}, white: {white}")
-        #print(f"shift: {shift}, stretch_factor: {stretch_factor}, min: {array.min(axis=(0, 1))}, max: {array.max(axis=(0, 1))}")
-        if (shift < 0).any():
-            # small gamma results in a low black point => upper limit for target_black!
-            channels = [name for name, s in zip('RGB', shift) if s < 0]
-            print(f"{fn} WARNING: lower black point or increase gamma for channel(s)", *channels)
+            L = grayscale(array)
+            array = blend(array, L, saturation)
 
-    # Adjust saturation before gamma (deprecated)
-    if (saturation != 1 and arg.saturation_before_gamma and not arg.saturation_first):
-        L = grayscale(array)
-        array = blend(array, L, saturation)
+        if arg.model:
+            # Simulate: just test inference on first image
+            if arg.simulate and fn != fns[0]:
+                print(f"{fn} -> {out_fn}")
+                continue
 
-    # Gamma correction
-    if (gamma != 1).any():
-        array = array.clip(0, None)
-        array = 255 * np.power(array / 255, gamma)
+            # Resize image for model input
+            if 'array' in globals():
+                array_8 = array.clip(0, 255).astype('uint8')
+                resized = Image.fromarray(array_8, mode=(img.mode or 'RGB')).resize(model.input_size)
+                quantization_noise = array_8.astype(np.float32) - array  # range: (-1, 0]
+                plus_one = np.clip(array + 1, 0, 255).astype('uint8')
+            else:
+                array_8 = np.array(img)
+                resized = img.resize(model.input_size)
+                quantization_noise = None
 
-    # Adjust saturation
-    if (saturation != 1 and not (arg.saturation_before_gamma or arg.saturation_first)):
-        L = grayscale(array)
-        array = blend(array, L, saturation)
+            free_curve = model(np.array(resized, dtype=np.float32))
 
-    array = array.clip(0, 255)
+            array = free_curve_map_image(array_8, free_curve)
 
-    new_img = Image.fromarray(np.uint8(array))
-    del array  # remove from namespace before next fn iteration
+            # Eliminate quantization noise
+            if quantization_noise is not None:
+                transformed_plus_one = free_curve_map_image(plus_one, free_curve)
+                transformed_noise = (transformed_plus_one - array) * quantization_noise  # negative
+                array -= transformed_noise
 
-    # Add attributes required to preserve JPEG quality
-    for attr in 'format layer layers quantization'.split():
-        value = getattr(img, attr, None)
-        if value is not None:
-            setattr(new_img, attr, value)
+            if arg.simulate:
+                print(f"{fn} -> {out_fn}")
+                continue
 
-    # Add other attributes (obsolete?)
-    for attr in 'info'.split():
-        value = getattr(img, attr, None)
-        if value is not None:
-            setattr(new_img, attr, value)
+        else:
+            blackpoint, whitepoint = get_blackpoint_whitepoint(img, sample_mode, blackclip, whiteclip)
 
-    quality = 'keep' if (img.format in {'JPEG'}) else DEFAULT_QUALITY
+            # Set targets, limit shifts in black/whitepoint for low-contrast images
+            target_black = np.array(arg.blackpoint, dtype=int)
+            target_white = np.array(arg.whitepoint, dtype=int) if arg.whitepoint else None
+            if (blackpoint > max_black).any():
+                shift = max_blackshift * (255 - blackpoint) / (255 - max_blackshift)
+                target_black = np.maximum(target_black, blackpoint - shift)
+            if (whitepoint < min_white).any() and arg.whitepoint:
+                if np.var(max_whiteshift) == 0:
+                    # avoid clipping to preserve hue + saturation of white point
+                    max_whiteshift = np.minimum(max_whiteshift, (target_white - whitepoint).min())
+                shift = max_whiteshift * whitepoint / (255 - max_whiteshift)
+                target_white = np.minimum(target_white, whitepoint + shift)
 
-    # Make reproducible, leave CLI args in JPEG comment
-    if getattr(arg, 'cli_params', None):
-        cli_params = arg.cli_params
-    else:
-        cli_params = purge_cli_params(sys.argv[1:], fn)
-    comment = make_comment(img, __version__, cli_params)
+            # Set blackpoint to min(target_black, blackpoint).
+            target_black = np.minimum(target_black, blackpoint)
 
-    # Save JPEG, regardless of output file extension (TODO: handle other formats and their metadata)
-    new_img.save(out_fn, format=img.format, comment=comment, optimize=True, quality=quality)
+            # Set whitepoint to max(target_white, whitepoint) or preserve it.
+            if KEEP_WHITE and (target_white is None):
+                whitepoint = np.array([255, 255, 255])
+            target_white = whitepoint if target_white is None else np.maximum(target_white, whitepoint)
 
-    # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
-    # Hence, this is the only way to fully preserve the entire EXIF:
-    if hasattr(img, 'info') and 'exif' in img.info:
-        piexif.transplant(str(fn), str(out_fn))
+            # Simulate: just print black and white points
+            if arg.simulate:
+                print(f"{fn} -> {out_fn} (black point: {blackpoint} -> {np.uint8(target_black)},", 
+                    f"whitepoint: {whitepoint} -> {np.uint8(target_white)})")
+                continue
 
-    # Logging
-    infos = [f'{fn} -> {out_fn}']
-    if not arg.model and (blackpoint != target_black).any():
-        high = 'high ' if (blackpoint > max_black).any() else ''
-        infos.append(f'{high}black point {blackpoint} -> {np.uint8(target_black)}')
-    if not arg.model and (whitepoint != target_white).any():
-        low = 'low ' if (whitepoint < min_white).any() else ''
-        infos.append(f'{low}white point {whitepoint} -> {np.uint8(target_white)}')
-    print(', '.join(infos))
+            # Make target black/white points gamma-agnostic
+            black = 255 * np.power(target_black / 255, 1 / gamma)
+            white = 255 * np.power(target_white / 255, 1 / gamma)
+
+            shift = (blackpoint - black) * white / (white - black)
+            stretch_factor = white / (whitepoint - shift)
+            if 'array' not in globals():
+                array = np.array(img, dtype=np.float32)
+            array = (array - shift) * stretch_factor
+            #print(f"black: {black}, white: {white}")
+            #print(f"shift: {shift}, stretch_factor: {stretch_factor}, min: {array.min(axis=(0, 1))}, max: {array.max(axis=(0, 1))}")
+            if (shift < 0).any():
+                # small gamma results in a low black point => upper limit for target_black!
+                channels = [name for name, s in zip('RGB', shift) if s < 0]
+                print(f"{fn} WARNING: lower black point or increase gamma for channel(s)", *channels)
+
+        # Adjust saturation before gamma (deprecated)
+        if (saturation != 1 and arg.saturation_before_gamma and not arg.saturation_first):
+            L = grayscale(array)
+            array = blend(array, L, saturation)
+
+        # Gamma correction
+        if (gamma != 1).any():
+            array = array.clip(0, None)
+            array = 255 * np.power(array / 255, gamma)
+
+        # Adjust saturation
+        if (saturation != 1 and not (arg.saturation_before_gamma or arg.saturation_first)):
+            L = grayscale(array)
+            array = blend(array, L, saturation)
+
+        array = array.clip(0, 255)
+
+        new_img = Image.fromarray(np.uint8(array))
+        del array  # remove from namespace before next fn iteration
+
+        # Add attributes required to preserve JPEG quality
+        for attr in 'format layer layers quantization'.split():
+            value = getattr(img, attr, None)
+            if value is not None:
+                setattr(new_img, attr, value)
+
+        # Add other attributes (obsolete?)
+        for attr in 'info'.split():
+            value = getattr(img, attr, None)
+            if value is not None:
+                setattr(new_img, attr, value)
+
+        quality = 'keep' if (img.format in {'JPEG'}) else DEFAULT_QUALITY
+
+        # Make reproducible, leave CLI args in JPEG comment
+        if getattr(arg, 'cli_params', None):
+            cli_params = arg.cli_params
+        else:
+            cli_params = purge_cli_params(sys.argv[1:], fn)
+        comment = make_comment(img, __version__, cli_params)
+
+        # Save JPEG, regardless of output file extension (TODO: handle other formats and their metadata)
+        new_img.save(out_fn, format=img.format, comment=comment, optimize=True, quality=quality)
+
+        # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
+        # Hence, this is the only way to fully preserve the entire EXIF:
+        if hasattr(img, 'info') and 'exif' in img.info:
+            piexif.transplant(str(fn), str(out_fn))
+
+        # Logging
+        infos = [f'{fn} -> {out_fn}']
+        if not arg.model and (blackpoint != target_black).any():
+            high = 'high ' if (blackpoint > max_black).any() else ''
+            infos.append(f'{high}black point {blackpoint} -> {np.uint8(target_black)}')
+        if not arg.model and (whitepoint != target_white).any():
+            low = 'low ' if (whitepoint < min_white).any() else ''
+            infos.append(f'{low}white point {whitepoint} -> {np.uint8(target_white)}')
+        print(', '.join(infos))
