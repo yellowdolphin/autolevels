@@ -619,8 +619,8 @@ if __name__ == '__main__':
         infos = [f'{fn} -> {out_fn}']
         if not arg.model and (blackpoint != target_black).any():
             high = 'high ' if (blackpoint > max_black).any() else ''
-            infos.append(f'{high}black point: {blackpoint} -> {target_black.round().astype('int')}')
+            infos.append(f'{high}black point: {blackpoint} -> {target_black.round().astype("int")}')
         if not arg.model and (whitepoint != target_white).any():
             low = 'low ' if (whitepoint < min_white).any() else ''
-            infos.append(f'{low}white point: {whitepoint} -> {target_white.round().astype('int')}')
+            infos.append(f'{low}white point: {whitepoint} -> {target_white.round().astype("int")}')
         print(', '.join(infos))
