@@ -23,7 +23,7 @@ AutoLevels helps you fix these issues by letting you choose sensible black/white
 
 ## Installation
 
-If you have python 3.8 or later installed on your computer (Linux, MacOS), open a shell and execute
+If you have python 3.8 or later installed on a Linux or MacOS machine, open a shell and execute
 
 ```bash
 pip install git+https://github.com/yellowdolphin/autolevels.git
@@ -36,7 +36,10 @@ This will install also the following requirements if not found:
 
 If you want to use the fully automated curve correction feature, two additional steps are needed:
 1. Install [PyTorch](https://pytorch.org/)
-2. Download a [curve inference model]()
+2. Download a [Free Curve Inference model](https://www.kaggle.com/models/greendolphin/freecin) as tar.gz and extract it
+```bash
+tar -xzvf freecin-pytorch-xcittiny-v1.tar.gz
+```
 
 Now, you should be good to go:
 ```bash
