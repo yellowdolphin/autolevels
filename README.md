@@ -20,3 +20,25 @@ AutoLevels helps you fix these issues by letting you choose sensible black/white
 - Preserves JPEG properties (quality, EXIF)
 - Open source, free software (GPLv3)
 
+
+## Installation
+
+If you have python 3.8 or later installed on your computer (Linux, MacOS), open a shell and execute
+
+```bash
+pip install git+https://github.com/yellowdolphin/autolevels.git
+```
+
+This will install also the following requirements if not found:
+- numpy
+- pillow
+- piexif
+
+If you want to use the fully automated curve correction feature, two additional steps are needed:
+1. Install [PyTorch](https://pytorch.org/)
+2. Download a [curve inference model]()
+
+Now, you should be good to go:
+```bash
+autolevels --model {your_downloaded_model_file} -- example.jpg
+```

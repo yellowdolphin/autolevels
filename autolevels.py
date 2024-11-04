@@ -2,14 +2,13 @@
 __version__ = '0.1.2'
 
 from pathlib import Path
-from shutil import copy2
-from PIL import Image, ImageFilter, ImageEnhance
-import piexif
 from argparse import ArgumentParser
 from time import perf_counter
 import sys
 
 import numpy as np
+from PIL import Image, ImageFilter, ImageEnhance
+import piexif
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
