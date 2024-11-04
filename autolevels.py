@@ -378,7 +378,7 @@ def make_comment(img, version, cli_params):
     return '\n'.join(comments)
 
 
-if __name__ == '__main__':
+def main():
     arg = parser.parse_args()
 
     if arg.version:
@@ -624,3 +624,7 @@ if __name__ == '__main__':
             low = 'low ' if (whitepoint < min_white).any() else ''
             infos.append(f'{low}white point: {whitepoint} -> {target_white.round().astype("int")}')
         print(', '.join(infos))
+
+
+if __name__ == '__main__':
+    main()
