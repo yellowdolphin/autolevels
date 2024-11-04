@@ -1,4 +1,4 @@
-#!/home/wanko/miniconda3/bin/python
+#!/usr/bin/env python3
 __version__ = '0.1.2'
 
 from pathlib import Path
