@@ -23,7 +23,7 @@ AutoLevels helps you fix these issues by letting you choose sensible black/white
 
 ## Installation
 
-If you have python 3.8 or later installed on a Linux or MacOS machine, open a shell and execute
+If you have python 3.9 or later installed on a Linux or MacOS machine, open a shell and execute
 
 ```bash
 pip install git+https://github.com/yellowdolphin/autolevels.git

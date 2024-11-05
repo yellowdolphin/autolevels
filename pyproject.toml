@@ -1,0 +1,34 @@
+[build-system]
+requires = ["flit_core >=3.4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "autolevels"
+version = "1.0.0"
+description = "A tool for automatic photo enhancement using curve corrections."
+readme = "README.md"
+authors = [{name = "Marius Wanko", email = "marius.wanko@gmail.com"}]
+license = {text = "GPL-3.0"}
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3.9",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Graphics"
+]
+
+[project.urls]
+Homepage = "https://github.com/yellowdolphin/autolevels"
+Issues = "https://github.com/yellowdolphin/autolevels/issues"
+Changelog = "https://github.com/yellowdolphin/autolevels/blob/master/CHANGELOG.md"
+
+[project.dependencies]
+numpy = "*"
+pillow = "*"
+piexif = "*"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+autolevels = "autolevels:main"
