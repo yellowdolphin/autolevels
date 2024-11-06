@@ -97,7 +97,8 @@ file_location.add_argument('--fstring', default=None,
                                         help=('Expand input file names using a Python f-string. '
                                               'Example: --fstring f"IMG_{x:04d}.jpg" -- 3 4 5  expands to  '
                                               'IMG_0003.jpg IMG_0004.jpg IMG_0005.jpg'))
-file_location.add_argument('--outdir', '--outfolder', default=None, help='Write output files here (default: original folder)')
+file_location.add_argument('--outdir', '--outfolder', default=None,
+                                                      help='Write output files here (default: current directory)')
 file_location.add_argument('--outsuffix', default=None, type=str,
                                           help=('Suffix (including file extension) used in output file names. '
                                                 'Default: append "_al" to input file name (before file extension). '
@@ -443,7 +444,7 @@ def main():
     assert fns, f'No matching files found in "{path}"'
 
     # Output file options
-    outdir = Path(arg.outdir) if arg.outdir else None
+    outdir = Path(arg.outdir) if arg.outdir else Path('.')
     if outdir and not arg.simulate:
         outdir.mkdir(exist_ok=True)
 
@@ -462,7 +463,7 @@ def main():
 
         # Decide output file name
         if arg.outfstring:
-            out_fn = (outdir or fn.parent) / evaluate_fstring(arg.outfstring, arg.files[i])
+            out_fn = outdir / evaluate_fstring(arg.outfstring, arg.files[i])
         else:
             stem, ext = fn.stem, fn.suffix
             if arg.outprefix and arg.prefix:
