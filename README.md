@@ -1,14 +1,12 @@
-# Autolevels
+# AutoLevels
 
-AutoLevels is a program for batch-processing images to fix most common issues in a semi- for fully-automated fashion.
-
+AutoLevels is a program for batch-processing images to fix common issues in a semi- or fully-automated fashion.
 
 ## Purpose
 
-When you encounter images scanned from analog film or poorly processed by automatic corrections, such as "backlight" or simply underexposed, you will find black/white points that are too high/low. Even worse, they can differ by channel and produce a weird glow in dark areas or color cast on the entire image. A typical quick solution is offered by "autolevel" or contrast enhancing features, which set black and white points to zero and 255, respectively. This again might overshoot the problem, the result may appear unnatural, in particular if the original image has a low contrast.
+When you encounter images scanned from analog film or poorly processed by automatic corrections, such as "backlight" or simply underexposed, you will find black/white points that are too high/low. Even worse, they can differ by channel and produce a weird glow in dark areas or color cast on the entire image. A typical quick solution is offered by "autolevel" or contrast enhancing features, which set black and white points to zero and 255, respectively. This again might overshoot the problem, and the result may appear unnatural, particularly if the original image has low contrast.
 
 AutoLevels helps you fix these issues by letting you choose sensible black/white points for a batch of images. It detects low-contrast images and treats them differently. Along the way, you can remove a constant color cast, change gamma and saturation. If your color cast or bad camera settings require a more complex curve correction, AutoLevels has you covered: try the AI-based free curve correction, which finds the optimal RGB curves for each image.
-
 
 ## Features
 
@@ -16,27 +14,32 @@ AutoLevels helps you fix these issues by letting you choose sensible black/white
 - Smooth/Histogram/Perceptive black/white point sampling
 - Automatically detect low-contrast images and apply sensible corrections
 - Fully automated curve correction
-- Flexible definition of input/output files (glob pattern, pre/suffix, python f-string)
+- Flexible definition of input/output files (glob pattern, prefix/suffix, Python f-string)
 - Preserves JPEG properties (quality, EXIF)
 - Open source, free software (GPLv3)
 
-
 ## Installation
 
-If you have python 3.9 or later installed on a Linux or MacOS machine, open a shell and execute
+If you have Python 3.9 or later installed on a Linux or MacOS machine, open a shell and execute:
+
+```bash
+pip install autolevels
+```
+
+This will install the current stable release. To get the latest version from the github repository, use
 
 ```bash
 pip install git+https://github.com/yellowdolphin/autolevels.git
 ```
 
-This will install also the following requirements if not found:
+This will also install the following requirements if not found:
 - numpy
 - pillow
 - piexif
 
 If you want to use the fully automated curve correction feature, two additional steps are needed:
-1. Install [PyTorch](https://pytorch.org/)
-2. Download a [Free Curve Inference model](https://www.kaggle.com/models/greendolphin/freecin) as tar.gz and extract it
+1. Install [PyTorch](https://pytorch.org/).
+2. Download a [Free Curve Inference model](https://www.kaggle.com/models/greendolphin/freecin) as tar.gz and extract it:
 ```bash
 tar -xzvf freecin-pytorch-xcittiny-v1.tar.gz
 ```
@@ -46,7 +49,6 @@ Now, you should be good to go:
 autolevels --model {your_downloaded_model_file} -- example.jpg
 ```
 
-
 ## Documentation
 
 ### Basic Usage
@@ -55,9 +57,9 @@ autolevels --model {your_downloaded_model_file} -- example.jpg
 autolevels --blackpoint 10 --whitepoint 255 --gamma 1.1 -- example.jpg
 ```
 
-This will process the file `example.jpg` and write the output to `example_al.jpg` using the default suffix "`_al`". You can change that with ```--outsuffix <my suffix>``` or specify an output folder with ```--outdir```. See **Batch Processing** for more ways to define input and output file names.
+This will process the file `example.jpg` and write the output to `example_al.jpg` using the default suffix "`_al`". You can change that with `--outsuffix <my suffix>` or specify an output folder with `--outdir`. See **Batch Processing** for more ways to define input and output file names.
 
-Get a description of all options with
+Get a description of all options with:
 
 ```bash
 autolevels -h
@@ -70,13 +72,13 @@ autolevels --simulate --blackpoint 10 5 0 --mode perceptive -- *.jpg
 
 ### Batch Processing
 
-The power of batch processing let's you apply the same corrections to a batch of images with a common capture source, camera settings, lightning conditions, or any common issue that can be fixed in a semi-automated fashion. If you don't have the time or expertise to find the optimal parameters, you can leverage AI power using the ```--model``` option. This will correct each image with an individual RGB curve, fully automatic, correcting color casts, bad exposure or white balance settings on the fly.
+The power of batch processing lets you apply the same corrections to a batch of images with a common capture source, camera settings, lighting conditions, or any common issue that can be fixed in a semi-automated fashion. If you don't have the time or expertise to find the optimal parameters, you can leverage AI power using the `--model` option. This will correct each image with an individual RGB curve, fully automatic, correcting color casts, bad exposure, or white balance settings on the fly.
 
 This leaves you with defining input and output files and paths. AutoLevels gives you three ways to do that.
 
 1. **Folders and glob patterns**
 ```bash
-    autolevels --outdir processed -- scans/*.png IMG_00[0-3]?.jpg
+autolevels --outdir processed -- scans/*.png IMG_00[0-3]?.jpg
 ```
 Your shell will interpret these glob patterns and expand the file names to `scans/12.png scans/23.png IMG_0015.jpg ...` matching any existing files in the current directory. All output files are written to the specified folder `processed`.
 
@@ -85,12 +87,12 @@ If you are afraid the expanded list of file paths exceeds the shell limit for th
 autolevels --folder ~/Pictures/scans -- "*.tif"
 ```
 
-2. **Prefixes und Suffixes**
-Often, your input file names will have a common folder, prefix, suffix and some variable part, in-between. You may want to keep the variable part and change any of the fixed components, for example
+2. **Prefixes and Suffixes**
+Often, your input file names will have a common folder, prefix, suffix, and some variable part in between. You may want to keep the variable part and change any of the fixed components, for example:
 ```bash
 autolevels --folder orig --prefix scn --suffix .jpg --outfolder processed --outprefix img_ --outsuffix .jpg -- 1 2 3 4
 ```
-will search for input files `orig/scn1.jpg ...` and write output files `processed/img_1.jpg ...`
+This will search for input files `orig/scn1.jpg ...` and write output files `processed/img_1.jpg ...`
 
 3. **Python f-strings**
 An alternative way to define file names in AutoLevels is to use Python f-strings. Don't worry, no Python skills required, just look at this example:
