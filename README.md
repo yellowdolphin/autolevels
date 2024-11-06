@@ -78,7 +78,7 @@ This leaves you with defining input and output files and paths. AutoLevels gives
 ```bash
     autolevels --outdir processed -- scans/*.png IMG_00[0-3]?.jpg
 ```
-Your shell will interpret these glob patterns and expand the file names to `scans/12.png scans/23.png IMG_0015.jpg ...` matching any existing files in the current directory. All output files are written to the specified folder `processed`. 
+Your shell will interpret these glob patterns and expand the file names to `scans/12.png scans/23.png IMG_0015.jpg ...` matching any existing files in the current directory. All output files are written to the specified folder `processed`.
 
 If you are afraid the expanded list of file paths exceeds the shell limit for the length of a command, you can specify a folder for the input files and enter the glob pattern in quotes to escape shell expansion:
 ```bash
