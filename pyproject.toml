@@ -10,6 +10,11 @@ readme = "README.md"
 authors = [{name = "Marius Wanko", email = "marius.wanko@gmail.com"}]
 license = {text = "GPL-3.0"}
 requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "pillow",
+    "piexif",
+]
 classifiers = [
     "Programming Language :: Python :: 3.9",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
@@ -21,11 +26,6 @@ classifiers = [
 Homepage = "https://github.com/yellowdolphin/autolevels"
 Issues = "https://github.com/yellowdolphin/autolevels/issues"
 Changelog = "https://github.com/yellowdolphin/autolevels/blob/master/CHANGELOG.md"
-
-[project.dependencies]
-numpy = "*"
-pillow = "*"
-piexif = "*"
 
 [project.optional-dependencies]
 dev = ["pytest"]
