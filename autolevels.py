@@ -13,7 +13,7 @@ import piexif
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
 BENCHMARK = False
-DEFAULT_QUALITY = 75
+DEFAULT_QUALITY = 80
 REPRODUCIBLE = {'blackpoint', 'whitepoint', 'blackclip', 'whiteclip', 'maxblack', 'minwhite', 'max_blackshift',
                 'max_whiteshift', 'mode', 'gamma', 'model', 'saturation', 'saturation_first', 'saturation_before_gamma'}
 
@@ -220,9 +220,13 @@ def evaluate_fstring(s: str, x):
     return result
 
 
-def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
+def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
     # 3x3 or 5x5 envelope
     SMOOTH = ImageFilter.SMOOTH_MORE if mode == 'smoother' else ImageFilter.SMOOTH
+
+    img = Image.fromarray(array.clip(0, 255).astype('uint8'))
+    if (mode == 'perceptive') and (img.mode == 'L'):
+        mode = 'hist'  # equivalent for gray scale images
 
     if mode.startswith('smooth'):
         img = img.filter(SMOOTH)
@@ -234,7 +238,8 @@ def get_blackpoint_whitepoint(img, mode, pixel_black, pixel_white):
             ts = [0, 0, 0, 0]
             t0 = perf_counter()
         assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
-        R, G, B = (np.array(channel, dtype=np.float32) for channel in img.split())  # 0.37 s
+        #R, G, B = (np.array(channel, dtype=np.float32) for channel in img.split())  # 0.37 s
+        R, G, B = array.transpose(2, 0, 1)
         if BENCHMARK: ts[0], t0 = ts[0] + perf_counter() - t0, perf_counter()
         L = np.array(img.convert(mode='L'), dtype=np.float32)  # 0.06 s
         L_bp = L.min()
@@ -396,15 +401,14 @@ def main():
         arg = merge_args(current_arg=arg, extracted_arg=extracted_arg)
         assert hasattr(arg, 'cli_params'), 'merge_args deleted cli_params'
         print(f'Reproducing {arg.reproduce} processing: {arg.cli_params}')
+    sample_mode = arg.mode
     blackclip = np.array(arg.blackclip, dtype=float)
     max_blackshift = np.array(arg.max_blackshift, dtype=int)
     whiteclip = np.array(arg.whiteclip, dtype=float)
     min_white = np.array(arg.minwhite, dtype=int)
     max_whiteshift = np.array(arg.max_whiteshift, dtype=int)
-    sample_mode = arg.mode
     assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
     gamma = 1 / np.array(arg.gamma, dtype=float)
-    saturation = arg.saturation
     if arg.model:
         for fn in arg.model:
             assert Path(fn).exists(), f'Specified model file could not be found: {fn}'
@@ -479,11 +483,33 @@ def main():
             out_fn = (outdir or fn.parent) / f'{stem}{suf}'
         # TODO: check out_fn exists, add option -f to overwrite
 
-        img = Image.open(fn)
+        orig_img = Image.open(fn)
+        img = orig_img.copy()
+        array = None
+
+        # Handle image modes
+        img_alpha = img.getchannel('A') if img.mode.endswith('A') else None
+        if img.mode == 'RGBA':
+            r, g, b, img_alpha = img.split()
+            transparency = np.array(img_alpha).min() < 255
+            if transparency:
+                print("Warning: this is an RGBA image with transparency, assuming white canvas.")
+                canvas = Image.new('RGB', img.size, (255, 255, 255))
+                canvas.paste(img, mask=img_alpha)
+                img = canvas
+                del canvas, r, g, b
+            else:
+                img = Image.merge('RGB', (r, g, b))
+                del r, g, b
+        if (img.mode == 'L') and (arg.saturation != 1):
+            print(f'Warning: "{fn}" is gray scale image, ignoring saturation options.')
+            saturation = 1
+        else:
+            saturation = arg.saturation
 
         # Adjust saturation before anything else
-        if (saturation != 1 and arg.saturation_first):
-            array = np.array(img, dtype=np.float32)
+        if (saturation != 1) and arg.saturation_first:
+            array = np.array(img, dtype=np.float32) if array is None else array
             L = grayscale(array)
             array = blend(array, L, saturation)
 
@@ -494,17 +520,18 @@ def main():
                 continue
 
             # Resize image for model input
-            if 'array' in globals():
+            if array is None:
+                array_8 = np.array(img)
+                resized = img.resize(model.input_size)
+                quantization_noise = None
+            else:
                 array_8 = array.clip(0, 255).astype('uint8')
                 resized = Image.fromarray(array_8, mode=(img.mode or 'RGB')).resize(model.input_size)
                 quantization_noise = array_8.astype(np.float32) - array  # range: (-1, 0]
                 plus_one = np.clip(array + 1, 0, 255).astype('uint8')
-            else:
-                array_8 = np.array(img)
-                resized = img.resize(model.input_size)
-                quantization_noise = None
 
-            free_curve = model(np.array(resized, dtype=np.float32))
+            resized = np.array(resized.convert('RGB'), dtype=np.float32)
+            free_curve = model(resized)
 
             array = free_curve_map_image(array_8, free_curve)
 
@@ -519,7 +546,8 @@ def main():
                 continue
 
         else:
-            blackpoint, whitepoint = get_blackpoint_whitepoint(img, sample_mode, blackclip, whiteclip)
+            array = np.array(img, dtype=np.float32) if array is None else array
+            blackpoint, whitepoint = get_blackpoint_whitepoint(array, sample_mode, blackclip, whiteclip)
 
             # Set targets, limit shifts in black/white point for low-contrast images
             target_black = np.array(arg.blackpoint, dtype=int)
@@ -556,8 +584,6 @@ def main():
 
             shift = (blackpoint - black) * white / (white - black)
             stretch_factor = white / (whitepoint - shift)
-            if 'array' not in globals():
-                array = np.array(img, dtype=np.float32)
             array = (array - shift) * stretch_factor
             #print(f'black: {black}, white: {white}')
             #print(f'shift: {shift}, stretch_factor: {stretch_factor}, min: {array.min(axis=(0, 1))}, max: {array.max(axis=(0, 1))}')
@@ -581,38 +607,48 @@ def main():
             L = grayscale(array)
             array = blend(array, L, saturation)
 
-        array = array.clip(0, 255)
+        array = array.round().clip(0, 255).astype('uint8')
 
-        new_img = Image.fromarray(np.uint8(array))
-        del array  # remove from namespace before next fn iteration
+        img = Image.fromarray(array)
+
+        # Merge with alpha (RGBA images only)
+        if img_alpha is not None:
+            img = Image.merge('RGBA', [*img.split(), img_alpha])
 
         # Add attributes required to preserve JPEG quality
         for attr in 'format layer layers quantization'.split():
-            value = getattr(img, attr, None)
+            value = getattr(orig_img, attr, None)
             if value is not None:
-                setattr(new_img, attr, value)
+                setattr(img, attr, value)
 
-        # Add other attributes (obsolete?)
+        # Add other attributes
         for attr in 'info'.split():
-            value = getattr(img, attr, None)
+            value = getattr(orig_img, attr, None)
             if value is not None:
-                setattr(new_img, attr, value)
+                setattr(img, attr, value)
 
-        quality = 'keep' if (img.format in {'JPEG'}) else DEFAULT_QUALITY
+        # Configure save options
+        kwargs = {}
+        if orig_img.format == 'JPEG':
+            kwargs['quality'] = 'keep'
+        elif orig_img.format == 'TIFF':
+            kwargs['compression'] = orig_img.info['compression'] if 'compression' in orig_img.info else 'raw'
+            if kwargs['compression'] == 'jpeg':
+                kwargs['quality'] = DEFAULT_QUALITY  # 'keep' is invalid, TIFF stores no JPEG quality
 
         # Make reproducible, leave CLI args in JPEG comment
         if getattr(arg, 'cli_params', None):
             cli_params = arg.cli_params
         else:
             cli_params = purge_cli_params(sys.argv[1:], fn)
-        comment = make_comment(img, __version__, cli_params)
+        comment = make_comment(orig_img, __version__, cli_params)
 
-        # Save JPEG, regardless of output file extension (TODO: handle other formats and their metadata)
-        new_img.save(out_fn, format=img.format, comment=comment, optimize=True, quality=quality)
+        # Save original format, regardless of output file extension (TODO: handle other formats and their metadata)
+        img.save(out_fn, format=orig_img.format, comment=comment, optimize=True, **kwargs)
 
         # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
         # Hence, this is the only way to fully preserve the entire EXIF:
-        if hasattr(img, 'info') and 'exif' in img.info:
+        if hasattr(orig_img, 'info') and 'exif' in orig_img.info:
             piexif.transplant(str(fn), str(out_fn))
 
         # Logging

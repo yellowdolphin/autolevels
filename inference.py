@@ -104,16 +104,24 @@ def get_ensemble(filenames):
 
 def free_curve_map_image(img, curves):
     assert curves.dtype == np.float32, str(curves.dtype)  # float32
-    assert img.shape[2] == 3, str(img.shape)
     assert img.dtype == np.uint8, f"img.dtype: {img.dtype}"
     assert (curves >= 0).all(), f'curves.min: {curves.min()}'
     assert (curves <= 1).all(), f'curves.max: {curves.max()}'
     curves = curves.reshape(3, 256)
-    #print("R-curve:", curves[0])
+
+    # Handle gray scale image
+    if img.ndim == 2:
+        img = img[:, :, None]
+        curves = curves.mean(axis=0, keepdims=True)
+
     transformed = np.empty(img.shape, dtype=curves.dtype)
 
     # map each channel using fancy indexing
     for i, curve in enumerate(curves):
         transformed[:, :, i] = curve[img[:, :, i]]
+
+    # Remove channel dim from gray scale image
+    if transformed.shape[2] == 1:
+        transformed = transformed[:, :, 0]
 
     return transformed * 255  # return as np.float32
