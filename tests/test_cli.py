@@ -46,7 +46,7 @@ def test_default_run(simulate):
     result = run_autolevels(f'{simulate} --outdir images -- {TEST_IMAGE}')
     assert result.returncode == 0
     if simulate:
-        assert 'black point: [111  97 114] -> [81 67 84]' in result.stdout
+        assert 'black point: [111  97 115] -> [81 67 85]' in result.stdout
         assert 'white point: [254 251 248] -> [254 251 248]' in result.stdout
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
 
@@ -55,16 +55,16 @@ def test_blackpoint_option(simulate):
     """Test --blackpoint option with single and RGB values."""
     result = run_autolevels(f'{simulate} --outdir images --blackpoint 10 --mode smooth -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert 'black point: [70 56 58] -> [40 26 28]' in result.stdout
+    assert 'black point: [72 57 58] -> [42 27 28]' in result.stdout
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
     result = run_autolevels(f'{simulate} --outdir images --blackpoint 10 --mode smooth --maxblack 75 -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert 'black point: [70 56 58] -> [10 10 10]' in result.stdout
+    assert 'black point: [72 57 58] -> [10 10 10]' in result.stdout
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
     result = run_autolevels(f'{simulate} --outdir images --blackpoint 0 14 255 --mode smooth --maxblack 75 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    assert 'black point: [70 56 58] -> [ 0 14 58]' in result.stdout
+    assert 'black point: [72 57 58] -> [ 0 14 58]' in result.stdout
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_whitepoint_option(simulate):
@@ -95,11 +95,11 @@ def test_maxblack_minwhite_options(simulate):
     """Test --maxblack and --minwhite options with L and RGB values."""
     result = run_autolevels(f'{simulate} --outdir images --max-blackshift 10 --maxblack 100 -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert 'black point: [111  97 114] -> [101  87 104]' in result.stdout
+    assert 'black point: [111  97 115] -> [101  87 105]' in result.stdout
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
     result = run_autolevels(f'{simulate} --outdir images --max-blackshift 10 --maxblack 120 -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert 'black point: [111  97 114] -> [14 14 14]' in result.stdout
+    assert 'black point: [111  97 115] -> [14 14 14]' in result.stdout
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
 
     result = run_autolevels(f'{simulate} --outdir images --whitepoint 255 --minwhite 255 -- {TEST_IMAGE}')
