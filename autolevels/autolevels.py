@@ -455,7 +455,7 @@ def main():
     # TODO: implement batchwise inference on fns
     if arg.model:
         # Free-curve correction from predicted curve
-        from inference import get_model, get_ensemble, free_curve_map_image
+        from .inference import get_model, get_ensemble, free_curve_map_image
 
         if len(arg.model) == 1:
             model = get_model(arg.model[0])

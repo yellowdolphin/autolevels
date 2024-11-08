@@ -16,7 +16,7 @@ def remove_output_image():
 
 def run_autolevels(args):
     """Helper function to run the script with given args."""
-    result = subprocess.run(f'./autolevels.py {args}'.split(), capture_output=True, text=True)
+    result = subprocess.run(f'autolevels {args}'.split(), capture_output=True, text=True)
     return result
 
 def test_no_args():
@@ -24,7 +24,7 @@ def test_no_args():
     result = run_autolevels(f'')
     assert result.returncode == 1
     assert 'No files specified' in result.stderr
-    assert result.stdout.startswith('usage: autolevels.py')
+    assert result.stdout.startswith('usage: autolevels')
 
 def test_help_option():
     """Test --help option to display help information."""
@@ -35,7 +35,7 @@ def test_help_option():
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_version_option(simulate):
     """Test --version option to print version information."""
-    from autolevels import __version__
+    from autolevels.autolevels import __version__
     result = run_autolevels(f'{simulate} --version')
     assert result.returncode == 0
     assert result.stdout == f"AutoLevels version {__version__}\n"
