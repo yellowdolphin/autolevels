@@ -26,7 +26,7 @@ If you have Python 3.9 or later installed on a Linux or MacOS machine, open a sh
 pip install autolevels
 ```
 
-This will install the current stable release. To get the latest version from the github repository, use
+This will install the current stable release. To get the latest version from the github repository (requires git), use
 
 ```bash
 pip install git+https://github.com/yellowdolphin/autolevels.git

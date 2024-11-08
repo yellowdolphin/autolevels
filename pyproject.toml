@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "autolevels"
-version = "1.0.2"
+version = "1.0.0"
 description = "A tool for automatic photo enhancement using curve corrections."
 readme = "README.md"
 authors = [{name = "Marius Wanko", email = "marius.wanko@gmail.com"}]
@@ -13,7 +13,7 @@ requires-python = ">=3.9"
 dependencies = [
     "numpy",
     "pillow",
-    "piexif",
+    "piexif>=1.1.1,<2.0.0",
 ]
 classifiers = [
     "Programming Language :: Python :: 3.9",
