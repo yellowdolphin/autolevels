@@ -3,125 +3,151 @@ __version__ = '1.0.0'
 
 from pathlib import Path
 from argparse import ArgumentParser
-from time import perf_counter
 import sys
 
 import numpy as np
-from PIL import Image, ImageFilter, ImageEnhance
+from PIL import Image, ImageFilter
 import piexif
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
-BENCHMARK = False
 DEFAULT_QUALITY = 80
 REPRODUCIBLE = {'blackpoint', 'whitepoint', 'blackclip', 'whiteclip', 'maxblack', 'minwhite', 'max_blackshift',
                 'max_whiteshift', 'mode', 'gamma', 'model', 'saturation', 'saturation_first', 'saturation_before_gamma'}
 
-parser = ArgumentParser(description='Example: autolevels --blackpoint 10 --whitepoint 255 --gamma 1.2 input.jpg')
 
-points = parser.add_argument_group('Black and white point correction')
-points.add_argument('--blackpoint', nargs='+', default=14, type=int,
-                                    help=('Target black point, one L or three RGB values, range 0...255 (default: 14). '
-                                          'The image black point is measured per channel. If it is higher than the target '
-                                          'value, it will be lowered, otherwise kept unchanged.'))
-points.add_argument('--whitepoint', nargs='+', default=None, type=int,
-                                    help=('Target white point, one L or three RGB values, range 0...255 (default: keep). '
-                                          'The image white point is not changed by default, and will be increased to '
-                                          'this target value, if specified. '
-                                          'Note that hue and saturation of the highlights will be preserved '
-                                          '(see MINWHITE). '
-                                          'Therefore, the target values may be lower for some channels.'))
+def get_parser():
+    """Return an argument parser for the CLI."""
+    parser = ArgumentParser(description='Example: autolevels --blackpoint 10 --whitepoint 255 --gamma 1.2 input.jpg')
 
-clipping = parser.add_argument_group('Clip shadows and highlights')
-# adobe auto color defaults are between 0.001 and 0.005
-clipping.add_argument('--blackclip', nargs='+', default=0.002, type=float,
-                                     help=('Percentage of pixels darker than black point (shadows clipped). '
-                                           'Due to noise and sharpening, the mathematical black point '
-                                           'can be lower than the perceived one. To mitigate this, the image black '
-                                           'point can be lowered until a certain percentage of the pixels is darker '
-                                           'than the set target value for the black point. The default of 0.002 '
-                                           'ignores the darkest 0.2 percent of the pixels when calculating the '
-                                           'current black point.'))
-clipping.add_argument('--whiteclip', nargs='+', default=0.001, type=float,
-                                     help=('Percentage of pixels brighter than white point (highlights clipped). '
-                                           'The default of 0.001 ingores the brightest 0.1 percent of the pixels when '
-                                           'calculating the current white point.'))
+    points = parser.add_argument_group('Black and white point correction')
+    points.add_argument(
+        '--blackpoint', nargs='+', default=14, type=int, help=(
+                                'Target black point, one L or three RGB values, range 0...255 (default: 14). '
+                                'The image black point is measured per channel. If it is higher than the target '
+                                'value, it will be lowered, otherwise kept unchanged.'))
+    points.add_argument(
+        '--whitepoint', nargs='+', default=None, type=int, help=(
+                                'Target white point, one L or three RGB values, range 0...255 (default: keep). '
+                                'The image white point is not changed by default, and will be increased to '
+                                'this target value, if specified. '
+                                'Note that hue and saturation of the highlights will be preserved (see MINWHITE). '
+                                'Therefore, the target values may be lower for some channels.'))
 
-limit = parser.add_argument_group('If the image is low in contrast, limit the correction of shadows and highlights')
-limit.add_argument('--max-blackshift', nargs='+', default=30, type=int,
-                                       help=('Upper limit for the black point shift (default: 30). '))
-limit.add_argument('--max-whiteshift', nargs='+', default=30, type=int,
-                                       help=('Upper limit for the white point shift (default: 30). Note that hue and '
-                                             'saturation of the highlights will be preserved (see MINWHITE). Therefore, '
-                                             'the shift can be lower for some channels.'))
-limit.add_argument('--maxblack', nargs='+', default=None, type=int,
-                                 help=('Extends the range where black points are fully corrected. If the current black '
-                                       'point is higher than MAXBLACK, the shift drops to MAX_BLACKSHIFT. By default, '
-                                       'the range is not extended and MAXBLACK = BLACKPOINT + MAX_BLACKSHIFT.'))
-limit.add_argument('--minwhite', nargs='+', default=240, type=int,
-                                 help=('Minimum white point (L or RGB values) that will be fully corrected to assume '
-                                       'WHITEPOINT. If the image white point is below MINWHITE, its hue and saturation '
-                                       'will be preserved, instead. Default: 240.'))
+    clipping = parser.add_argument_group('Clip shadows and highlights')
+    # adobe auto color defaults are between 0.001 and 0.005
+    clipping.add_argument(
+        '--blackclip', nargs='+', default=0.002, type=float, help=(
+                                'Percentage of pixels darker than black point (shadows clipped). '
+                                'Due to noise and sharpening, the mathematical black point '
+                                'can be lower than the perceived one. To mitigate this, the image black '
+                                'point can be lowered until a certain percentage of the pixels is darker '
+                                'than the set target value for the black point. The default of 0.002 '
+                                'ignores the darkest 0.2 percent of the pixels when calculating the '
+                                'current black point.'))
+    clipping.add_argument(
+        '--whiteclip', nargs='+', default=0.001, type=float, help=(
+                                'Percentage of pixels brighter than white point (highlights clipped). '
+                                'The default of 0.001 ingores the brightest 0.1 percent of the pixels when '
+                                'calculating the current white point.'))
 
-bp_mode = parser.add_argument_group('Mode for determining the black and white points')
-bp_mode.add_argument('--mode', default='hist', choices=['smooth', 'smoother', 'hist', 'perceptive'],
-                               help=('Black/white point sample mode: '
-                                     '"smooth" takes the pixel min/max values from a copy of the image smoothened with '
-                                     'a 3x3 envelope to compensate for noise/sharpen effects. '
-                                     '"smoother" does the same with a 5x5 envelope. '
-                                     '"hist" calculates the values at which a fraction of BLACKCLIP (WHITECLIP) '
-                                     'pixels is darker (brighter) than the black (white) point, respectively. '
-                                     '"perceptive" does the same with a weighted histogram, which is slower but can '
-                                     'improve the blackpoint of images with color cast. Use --simulate to check the '
-                                     'measured black and white points before and after processing.'))
+    limit = parser.add_argument_group('If the image is low in contrast, limit the correction of shadows and highlights')
+    limit.add_argument(
+        '--max-blackshift', nargs='+', default=30, type=int, help=(
+                                'Upper limit for the black point shift (default: 30). '))
+    limit.add_argument(
+        '--max-whiteshift', nargs='+', default=30, type=int, help=(
+                                'Upper limit for the white point shift (default: 30). Note that hue and '
+                                'saturation of the highlights will be preserved (see MINWHITE). Therefore, '
+                                'the shift can be lower for some channels.'))
+    limit.add_argument(
+        '--maxblack', nargs='+', default=None, type=int, help=(
+                                'Extends the range where black points are fully corrected. If the current black '
+                                'point is higher than MAXBLACK, the shift drops to MAX_BLACKSHIFT. By default, '
+                                'the range is not extended and MAXBLACK = BLACKPOINT + MAX_BLACKSHIFT.'))
+    limit.add_argument(
+        '--minwhite', nargs='+', default=240, type=int, help=(
+                                'Minimum white point (L or RGB values) that will be fully corrected to assume '
+                                'WHITEPOINT. If the image white point is below MINWHITE, its hue and saturation '
+                                'will be preserved, instead. Default: 240.'))
 
-curve = parser.add_argument_group('Curve corrections')
-curve.add_argument('--gamma', nargs='+', type=float, default=[1.0],
-                              help=('Gamma correction with inverse gamma (larger is brighter), one L or three RGB values '
-                                    '(default: 1.0).'))
-curve.add_argument('--model', nargs='+', action='store', help='Model file(s) for free-curve correction')
+    bp_mode = parser.add_argument_group('Mode for determining the black and white points')
+    bp_mode.add_argument(
+        '--mode', default='hist', choices=['smooth', 'smoother', 'hist', 'perceptive'], help=(
+                                'Black/white point sample mode: '
+                                '"smooth" takes the pixel min/max values from a copy of the image smoothened with '
+                                'a 3x3 envelope to compensate for noise/sharpen effects. '
+                                '"smoother" does the same with a 5x5 envelope. '
+                                '"hist" calculates the values at which a fraction of BLACKCLIP (WHITECLIP) '
+                                'pixels is darker (brighter) than the black (white) point, respectively. '
+                                '"perceptive" does the same with a weighted histogram, which is slower but can '
+                                'improve the blackpoint of images with color cast. Use --simulate to check the '
+                                'measured black and white points before and after processing.'))
 
-sat = parser.add_argument_group('Saturation')
-sat.add_argument('--saturation', default=1, type=float,
-                                 help=('A value of 0 produces a gray image, a value larger than 1 increases saturation '
-                                       '(default: 1.0).'))
-sat.add_argument('--saturation-first', action='store_true', help='Adjust saturation before anything else')
-sat.add_argument('--saturation-before-gamma', action='store_true', help='Adjust saturation before gamma (deprecated)')
+    curve = parser.add_argument_group('Curve corrections')
+    curve.add_argument(
+        '--gamma', nargs='+', type=float, default=[1.0], help=(
+                                'Gamma correction with inverse gamma (larger is brighter), one L or three RGB values '
+                                '(default: 1.0).'))
+    curve.add_argument(
+        '--model', nargs='+', action='store', help='Model file(s) for free-curve correction')
 
-file_location = parser.add_argument_group('File locations')
-file_location.add_argument('--folder', default='.', help='Path to input images')
-file_location.add_argument('--prefix', default='', help='Common prefix of all input file names')
-file_location.add_argument('--suffix', default='',
-                                       help=('Common suffix (including file extension) of all input file names'))
-file_location.add_argument('--fstring', default=None,
-                                        help=('Expand input file names using a Python f-string. '
-                                              'Example: --fstring f"IMG_{x:04d}.jpg" -- 3 4 5  expands to  '
-                                              'IMG_0003.jpg IMG_0004.jpg IMG_0005.jpg'))
-file_location.add_argument('--outdir', '--outfolder', default=None,
-                                                      help='Write output files here (default: current directory)')
-file_location.add_argument('--outsuffix', default=None, type=str,
-                                          help=('Suffix (including file extension) used in output file names. '
-                                                'Default: append "_al" to input file name (before file extension). '
-                                                'If both SUFFIX and OUTSUFFIX are specified, OUTSUFFIX replaces '
-                                                'SUFFIX in the output file name.'))
-file_location.add_argument('--outprefix', default=None, type=str,
-                                          help=('Prefix used in output file names. Default: none or same as input file name. '
-                                                'If both PREFIX and OUTPREFIX are specified, OUTPREFIX replaces SUFFIX in '
-                                                'the output file name.'))
-file_location.add_argument('--outfstring', default=None, type=str,
-                                           help=('If input file names are expanded using a Python f-string FSTRING, an '
-                                                 'alternative f-string can be specified here for output files. Otherwise, '
-                                                 'this option will be ignored.'))
+    sat = parser.add_argument_group('Saturation')
+    sat.add_argument(
+        '--saturation', default=1, type=float, help=(
+                                'A value of 0 produces a gray image, a value larger than 1 increases saturation '
+                                '(default: 1.0).'))
+    sat.add_argument(
+        '--saturation-first', action='store_true', help='Adjust saturation before anything else')
+    sat.add_argument(
+        '--saturation-before-gamma', action='store_true', help='Adjust saturation before gamma (deprecated)')
 
-parser.add_argument('--simulate', '--sandbox', action='store_true',
-                                               help='Dry run: only read and process, skip file output')
-parser.add_argument('--reproduce', default='', help=('Read CLI options from metadata of specified image REPRODUCE. '
-                                                     'The latter must be the output of a compatible program version. '
-                                                     'Example: autolevels --reproduce processed_image.jpg '
-                                                     'other_images/*.jpg'))
-parser.add_argument('--version', action='store_true', help='Print version information and exit')
+    file_location = parser.add_argument_group('File locations')
+    file_location.add_argument(
+        '--folder', default='.', help='Path to input images')
+    file_location.add_argument(
+        '--prefix', default='', help='Common prefix of all input file names')
+    file_location.add_argument(
+        '--suffix', default='', help='Common suffix (including file extension) of all input file names')
+    file_location.add_argument(
+        '--fstring', default=None, help=(
+                                'Expand input file names using a Python f-string. '
+                                'Example: --fstring f"IMG_{x:04d}.jpg" -- 3 4 5  expands to  '
+                                'IMG_0003.jpg IMG_0004.jpg IMG_0005.jpg'))
+    file_location.add_argument(
+        '--outdir', '--outfolder', default=None, help='Write output files here (default: current directory)')
+    file_location.add_argument(
+        '--outsuffix', default=None, type=str, help=(
+                                'Suffix (including file extension) used in output file names. '
+                                'Default: append "_al" to input file name (before file extension). '
+                                'If both SUFFIX and OUTSUFFIX are specified, OUTSUFFIX replaces '
+                                'SUFFIX in the output file name.'))
+    file_location.add_argument(
+        '--outprefix', default=None, type=str, help=(
+                                'Prefix used in output file names. Default: none or same as input file name. '
+                                'If both PREFIX and OUTPREFIX are specified, OUTPREFIX replaces SUFFIX in '
+                                'the output file name.'))
+    file_location.add_argument(
+        '--outfstring', default=None, type=str, help=(
+                                'If input file names are expanded using a Python f-string FSTRING, an '
+                                'alternative f-string can be specified here for output files. Otherwise, '
+                                'this option will be ignored.'))
 
-parser.add_argument('files', nargs='*', action='store', help=('Input files to process. Example: scans/IMG_*.jpg'))
+    parser.add_argument(
+        '--simulate', '--sandbox', action='store_true', help='Dry run: only read and process, skip file output')
+    parser.add_argument(
+        '--reproduce', default='', help=(
+                                'Read CLI options from metadata of specified image REPRODUCE. '
+                                'The latter must be the output of a compatible program version. '
+                                'Example: autolevels --reproduce processed_image.jpg '
+                                'other_images/*.jpg'))
+    parser.add_argument(
+        '--version', action='store_true', help='Print version information and exit')
+
+    parser.add_argument(
+        'files', nargs='*', action='store', help='Input files to process. Example: scans/IMG_*.jpg')
+
+    return parser
 
 
 def extract_arg(filename, parser):
@@ -180,7 +206,7 @@ def evaluate_fstring(s: str, x):
     import re
 
     # Sanitize f-string for common argparse issues
-    assert len(s) > 1, f'The f-string is improperly formatted or missing quotes'
+    assert len(s) > 1, 'The f-string is improperly formatted or missing quotes'
     s = s[1:] if (s[0] == 'f') else s  # remove leading "f"
     s = '"' + s + '"' if (s[0] not in {'"', "'"}) else s  # add missing quotes
     s = 'f' + s if ('{' in s) else s  # add leading "f" if required
@@ -192,7 +218,7 @@ def evaluate_fstring(s: str, x):
     # Find all variable patterns in the f-string, allowing whitespace around the variable name
     matches = re.findall(r'\{\s*(\w+)\s*(:[^}]*)?\}', s)
     if len(matches) == 0:
-        raise ValueError(f'No valid variable symbol found in the f-string')
+        raise ValueError('No valid variable symbol found in the f-string')
     elif len(matches) > 1:
         raise ValueError('The f-string contains more than one variable symbol')
 
@@ -204,6 +230,11 @@ def evaluate_fstring(s: str, x):
     # Check if the variable name is a valid Python identifier
     if not var_name.isidentifier():
         raise ValueError(f'Invalid variable name "{var_name}" in the f-string')
+
+    # Check specifier does not contain huge numbers
+    specifier_numbers = re.findall(pattern=r'\d+', string=specifier)
+    if any(int(n) > 500 for n in specifier_numbers):
+        raise ValueError('The f-string is improperly formatted or missing quotes')
 
     # Check if the specifier ends with 'd' and convert x to int if so
     if specifier.endswith('d'):
@@ -234,27 +265,18 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
         return array.min(axis=(0, 1)), array.max(axis=(0, 1))
 
     elif mode.startswith('perceptive'):
-        if BENCHMARK:
-            ts = [0, 0, 0, 0]
-            t0 = perf_counter()
         assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
-        #R, G, B = (np.array(channel, dtype=np.float32) for channel in img.split())  # 0.37 s
         R, G, B = array.transpose(2, 0, 1)
-        if BENCHMARK: ts[0], t0 = ts[0] + perf_counter() - t0, perf_counter()
-        L = np.array(img.convert(mode='L'), dtype=np.float32)  # 0.06 s
+        L = np.array(img.convert(mode='L'), dtype=np.float32)
         L_bp = L.min()
         L = (L - L_bp) * (255 / (255 - L_bp)) + 0.5
-        if BENCHMARK: ts[1], t0 = ts[1] + perf_counter() - t0, perf_counter()
         pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(3)
         pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(3)
         blackpoint, whitepoint = [], []
 
         for pix_black, pix_white, channel in zip(pixel_black, pixel_white, (R, G, B)):
-            weight = np.where(channel >= L, 1, channel / L)  # 0.20 s
-            if BENCHMARK: ts[2], t0 = ts[2] + perf_counter() - t0, perf_counter()
-            #assert (channel >= 0).all()  # 0.10 s
+            weight = np.where(channel >= L, 1, channel / L)
             hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)  # 0.49 s (0.58 with uint8)
-            if BENCHMARK: ts[3], t0 = ts[3] + perf_counter() - t0, perf_counter()
             n_pixel = hist.sum()
 
             # the rest takes no time
@@ -272,17 +294,13 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
                     break
             whitepoint.append(x)
 
-        if BENCHMARK: 
-            for i, t in enumerate(ts):
-                print(f'timer {i}: {t}')
-
         return np.array(blackpoint), np.array(whitepoint)
 
     elif mode in {'hist', 'histogram'}:
         channels = img.split()
         pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(len(channels))
         pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(len(channels))
-        
+
         n_pixel = img.height * img.width
         blackpoint, whitepoint = [], []
 
@@ -384,6 +402,7 @@ def make_comment(img, version, cli_params):
 
 
 def main():
+    parser = get_parser()
     arg = parser.parse_args()
 
     if arg.version:
@@ -430,7 +449,8 @@ def main():
         fns = []
         for x in arg.files:
             if x in {'.', '..', '/'}:
-                print(f'Skipping "{x}"'); continue
+                print(f'Skipping "{x}"')
+                continue
             try:
                 parent, stem, ext = Path(x).parent, Path(x).stem, Path(x).suffix
                 name = f'{pre}{stem}{suf}{ext}'
@@ -574,8 +594,8 @@ def main():
 
             # Simulate: just print black and white points
             if arg.simulate:
-                print(f'{fn} -> {out_fn} (black point: {blackpoint} -> {target_black.round().astype("int")},', 
-                    f'white point: {whitepoint} -> {target_white.round().astype("int")})')
+                print(f'{fn} -> {out_fn} (black point: {blackpoint} -> {target_black.round().astype("int")}, '
+                      f'white point: {whitepoint} -> {target_white.round().astype("int")})')
                 continue
 
             # Make target black/white points gamma-agnostic
@@ -585,8 +605,6 @@ def main():
             shift = (blackpoint - black) * white / (white - black)
             stretch_factor = white / (whitepoint - shift)
             array = (array - shift) * stretch_factor
-            #print(f'black: {black}, white: {white}')
-            #print(f'shift: {shift}, stretch_factor: {stretch_factor}, min: {array.min(axis=(0, 1))}, max: {array.max(axis=(0, 1))}')
             if (shift < 0).any():
                 # small gamma results in a low black point => upper limit for target_black!
                 channels = [name for name, s in zip('RGB', shift) if s < 0]

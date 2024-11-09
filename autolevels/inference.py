@@ -14,7 +14,7 @@ def monotonize(curves):
 
 
 def get_model(filename):
-    "Return a model that outputs a torch tensor with shape [N, 256, C]"
+    """Return a model that outputs a torch tensor with shape [N, 256, C]"""
 
     if Path(filename).suffix == '.pt':
         import torch
@@ -24,9 +24,7 @@ def get_model(filename):
         def model(inputs):
             # channels-first, add batch dim, floatify
             inputs = torch.tensor(inputs.transpose(2, 0, 1)[None, ...], dtype=torch.float32) / 255
-            #print("inputs:", inputs.dtype, inputs.min(), inputs.max(), inputs.shape)
             preds = np.array(scripted_model(inputs))
-            #print("preds:", preds.shape, preds.dtype)
 
             # post-process preds
             preds = np.clip(preds, 0, 1)

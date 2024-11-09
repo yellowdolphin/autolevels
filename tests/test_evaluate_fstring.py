@@ -1,11 +1,13 @@
 import pytest
 from autolevels import evaluate_fstring
 
+
 def test_basic_functionality():
     """Test basic string formatting cases"""
     assert evaluate_fstring("f'Hello {name}!'", "World") == "Hello World!"
     assert evaluate_fstring("f'Number: {num}'", 42) == "Number: 42"
     assert evaluate_fstring('f"Value: {val}"', True) == "Value: True"
+
 
 def test_format_specifications():
     """Test various format specifications"""
@@ -15,14 +17,17 @@ def test_format_specifications():
     assert evaluate_fstring("f'{text:>10.5}'", "hello world") == "     hello"
     assert evaluate_fstring('"{x}"', '42') == "42"
 
+
 def test_automatic_str_conversion():
     """Test str to int conversion according to format specification"""
     assert evaluate_fstring("f'1-{fn:03d}.jpg'", '5') == "1-005.jpg"
+
 
 def test_sanitize_fstring():
     """Test adding missing quotes and leading f"""
     assert evaluate_fstring("f1-{fn:03d}.jpg", '5') == "1-005.jpg"
     assert evaluate_fstring("1-{fn:03d}.jpg", '5') == "1-005.jpg"
+
 
 def test_security_threats():
     """Test potential security threats and code injection attempts"""
@@ -45,13 +50,14 @@ def test_security_threats():
         # DoS via massive precision
         "f'{x:.{2**1000000}f}'",
         # Memory exhaustion
-        #"f'{x:100000000000000000d}'",
+        "f'{x:100000000000000000d}'",
         # Attempt to exploit with complex expression
         'f"{x.__class__.__bases__[0].__subclasses__()}"',
     ]
     for dangerous_input in dangerous_inputs:
         with pytest.raises(ValueError):
             evaluate_fstring(dangerous_input, 42)
+
 
 def test_edge_cases():
     """Test edge cases and potential error conditions"""
@@ -70,7 +76,6 @@ def test_edge_cases():
         "f'{var!a}'",  # Python's !a representation
         'f"{var:invalid}"',
         # Empty or whitespace
-        #"",  # check argparse handles this
         "f''",
         "f' '",
         # Mismatched quotes
@@ -85,11 +90,13 @@ def test_edge_cases():
             evaluate_fstring(invalid_input, 0.0)
             evaluate_fstring(invalid_input, '42')
 
+
 def test_whitespace_handling():
     """Test handling of whitespace in various positions"""
     assert evaluate_fstring("f'{ var }'", 42) == "42"
     with pytest.raises(ValueError):
         evaluate_fstring("f'{ var:>5 }'", 42)
+
 
 def test_error_messages():
     """Test that appropriate error messages are raised"""
@@ -99,5 +106,5 @@ def test_error_messages():
     with pytest.raises(ValueError, match="No valid variable symbol"):
         evaluate_fstring("f'{}'", 42)
 
-    with pytest.raises(ValueError, match=f'Format is "d", but "not a number" is not a number'):
+    with pytest.raises(ValueError, match='Format is "d", but "not a number" is not a number'):
         evaluate_fstring("f'{var:d}'", "not a number")

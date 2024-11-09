@@ -7,6 +7,7 @@ TEST_IMAGE = 'images/lübeck.jpg'
 DEFAULT_OUTPUT_IMAGE_PATH = Path('images/lübeck_al.jpg')
 MODEL = '../../../Downloads/free_xcittiny_wa14.pt'
 
+
 @pytest.fixture(autouse=True)
 def remove_output_image():
     """Fixture to remove output image if it exists before/after each test."""
@@ -14,23 +15,27 @@ def remove_output_image():
     yield
     DEFAULT_OUTPUT_IMAGE_PATH.unlink(missing_ok=True)
 
+
 def run_autolevels(args):
     """Helper function to run the script with given args."""
     result = subprocess.run(f'autolevels {args}'.split(), capture_output=True, text=True)
     return result
 
+
 def test_no_args():
     """Test usage is shown if no args."""
-    result = run_autolevels(f'')
+    result = run_autolevels('')
     assert result.returncode == 1
     assert 'No files specified' in result.stderr
     assert result.stdout.startswith('usage: autolevels')
 
+
 def test_help_option():
     """Test --help option to display help information."""
-    result = run_autolevels(f'--help')
+    result = run_autolevels('--help')
     assert result.returncode == 0
     assert result.stdout.startswith("usage: ")
+
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_version_option(simulate):
@@ -39,6 +44,7 @@ def test_version_option(simulate):
     result = run_autolevels(f'{simulate} --version')
     assert result.returncode == 0
     assert result.stdout == f"AutoLevels version {__version__}\n"
+
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_default_run(simulate):
@@ -49,6 +55,7 @@ def test_default_run(simulate):
         assert 'black point: [111  97 115] -> [81 67 85]' in result.stdout
         assert 'white point: [254 251 248] -> [254 251 248]' in result.stdout
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_blackpoint_option(simulate):
@@ -66,6 +73,7 @@ def test_blackpoint_option(simulate):
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
     assert 'black point: [72 57 58] -> [ 0 14 58]' in result.stdout
 
+
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_whitepoint_option(simulate):
     """Test --whitepoint option with single and RGB values."""
@@ -78,6 +86,7 @@ def test_whitepoint_option(simulate):
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
     assert 'white point: [254 251 248] -> [254 251 252]' in result.stdout
 
+
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_blackclip_whiteclip_options(simulate):
     """Test --blackclip and --whiteclip options with various percentages."""
@@ -89,6 +98,7 @@ def test_blackclip_whiteclip_options(simulate):
         assert 'white point: [251 251 247]' in result.stdout
     else:
         assert 'high black point: [127 110 129]' in result.stdout
+
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_maxblack_minwhite_options(simulate):
@@ -127,6 +137,7 @@ def test_maxblack_minwhite_options(simulate):
     assert ('white point: [254 251 248] -> [254 251 248]' in result.stdout) or ('white point:' not in result.stdout)
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
 
+
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_mode_option(simulate):
     """Test --mode option with all valid values."""
@@ -134,6 +145,7 @@ def test_mode_option(simulate):
         result = run_autolevels(f'{simulate} --outdir images --mode {mode} -- {TEST_IMAGE}')
         assert result.returncode == 0
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_gamma_option(simulate):
@@ -145,6 +157,7 @@ def test_gamma_option(simulate):
     assert result.returncode == 0
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
 
+
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_saturation_options(simulate):
     """Test saturation-related options."""
@@ -153,13 +166,15 @@ def test_saturation_options(simulate):
         assert result.returncode == 0
         assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
 
+
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_output_options(simulate):
     """Test file location options folder, prefix, suffix, etc."""
     output_fn = DEFAULT_OUTPUT_IMAGE_PATH.parent / 'tmp' / 'koblenz.jpg'
     output_fn.unlink(missing_ok=True)
     print("output_fn:", output_fn)
-    result = run_autolevels(f'{simulate} --folder images --prefix lü --suffix eck.jpg --outdir images/tmp --outprefix ko --outsuffix lenz.jpg -- b')
+    result = run_autolevels(f'{simulate} --folder images --prefix lü --suffix eck.jpg '
+                            '--outdir images/tmp --outprefix ko --outsuffix lenz.jpg -- b')
     assert result.returncode == 0
     assert output_fn.exists() != bool(simulate)
     if simulate:
@@ -168,12 +183,14 @@ def test_output_options(simulate):
     if output_fn.parent.exists():
         Path(output_fn.parent).rmdir()
 
+
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_fstring_options(simulate):
     """Test --fstring options"""
     output_fn = DEFAULT_OUTPUT_IMAGE_PATH.parent / 'tmp' / 'koblenz.jpg'
     output_fn.unlink(missing_ok=True)
-    result = run_autolevels(simulate + ' --folder images --fstring f"lü{x:^.1s}eck.jpg" --outfstring "ko{x:<.1s}lenz.jpg" --outdir images/tmp -- b')
+    result = run_autolevels(simulate + ' --folder images --fstring f"lü{x:^.1s}eck.jpg" --outfstring "ko{x:<.1s}lenz.jpg" '
+                            '--outdir images/tmp -- b')
     assert result.returncode == 0
     assert output_fn.exists() != bool(simulate)
     if simulate:
@@ -181,6 +198,7 @@ def test_fstring_options(simulate):
     output_fn.unlink(missing_ok=True)
     if output_fn.parent.exists():
         Path(output_fn.parent).rmdir()
+
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_glob_pattern(simulate):
@@ -188,6 +206,7 @@ def test_glob_pattern(simulate):
     result = run_autolevels(simulate + ' --outdir images --mode smooth --folder images -- *.jpg')
     assert result.returncode == 0
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_reproduce_option(simulate):
@@ -202,10 +221,10 @@ def test_reproduce_option(simulate):
     assert repro_options in result.stdout
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
 
+
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_model_option(simulate):
     """Test --model option using free curve inference with MODEL."""
     result = run_autolevels(f'{simulate} --outdir images --model {MODEL} -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-
