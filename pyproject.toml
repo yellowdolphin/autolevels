@@ -28,7 +28,7 @@ Issues = "https://github.com/yellowdolphin/autolevels/issues"
 Changelog = "https://github.com/yellowdolphin/autolevels/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "flake8"]
 
 [project.scripts]
 autolevels = "autolevels:main"
