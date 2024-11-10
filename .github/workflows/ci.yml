@@ -33,6 +33,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install --upgrade flit
         flit install --symlink
+    - name: Install PyTorch
+      run: |
+        if [ "${{ matrix.operating-system }}" = "macos-latest" ]; then
+          pip install torch==2.5.1
+        else
+          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+        fi
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names

@@ -5,7 +5,7 @@ from pathlib import Path
 # Define path to the test image
 TEST_IMAGE = 'images/lübeck.jpg'
 DEFAULT_OUTPUT_IMAGE_PATH = Path('images/lübeck_al.jpg')
-MODEL = '../../../Downloads/free_xcittiny_wa14.pt'
+MODEL = 'models/free_test.pt'
 
 
 @pytest.fixture(autouse=True)
