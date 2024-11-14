@@ -4,6 +4,7 @@ __version__ = '1.0.0'
 from pathlib import Path
 from argparse import ArgumentParser
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from PIL import Image, ImageFilter
@@ -251,6 +252,29 @@ def evaluate_fstring(s: str, x):
     return result
 
 
+def get_channel_cutoff(hist, thresh, upper=False, norm=None):
+    """Return `hist` bin where accumulated count exceeds fraction of `thresh`.
+
+    Args:
+        hist (list or array-like): Histogram data.
+        pixel_thresh (float): Fraction of the total count to reach.
+        upper (bool, optional): If True, start accumulating from the last bin (descending order). Default: False.
+        norm (int, optional): Normalize histogram with `norm` rather than sum(hist).
+
+    Returns:
+        int: The index of the bin where the accumulated count first exceeds `pixel_thresh`.
+    """
+    n_bins = len(hist)
+    n_total = norm or sum(hist)
+    limit = n_total * thresh
+    accsum = 0
+    _range = range(n_bins - 1, -1, -1) if upper else range(n_bins)
+    for bin in _range:
+        accsum += hist[bin]
+        if accsum > limit:
+            return bin
+
+
 def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
     # 3x3 or 5x5 envelope
     SMOOTH = ImageFilter.SMOOTH_MORE if mode == 'smoother' else ImageFilter.SMOOTH
@@ -264,35 +288,51 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
         array = np.array(img)  # HWC
         return array.min(axis=(0, 1)), array.max(axis=(0, 1))
 
-    elif mode.startswith('perceptive'):
+    elif mode == 'perceptive_serial':
         assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
         R, G, B = array.transpose(2, 0, 1)
-        L = np.array(img.convert(mode='L'), dtype=np.float32)
+        L = np.array(img.convert(mode='L'), dtype=np.float32)  # faster than np.mean or python
         L_bp = L.min()
         L = (L - L_bp) * (255 / (255 - L_bp)) + 0.5
         pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(3)
         pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(3)
+        n_pixel = img.height * img.width
         blackpoint, whitepoint = [], []
 
         for pix_black, pix_white, channel in zip(pixel_black, pixel_white, (R, G, B)):
             weight = np.where(channel >= L, 1, channel / L)
-            hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)  # 0.49 s (0.58 with uint8)
-            n_pixel = hist.sum()
+
+            # this is the bottleneck (uint8: even slower)
+            hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)
 
             # the rest takes no time
-            accsum = 0
-            for x in range(256):
-                accsum += hist[x]
-                if accsum > n_pixel * pix_black:
-                    break
-            blackpoint.append(x)
+            blackpoint.append(get_channel_cutoff(hist, thresh=pix_black, upper=False, norm=n_pixel))
+            whitepoint.append(get_channel_cutoff(hist, thresh=pix_white, upper=True, norm=n_pixel))
 
-            accsum = 0
-            for x in range(255, -1, -1):
-                accsum += hist[x]
-                if accsum > n_pixel * pix_white:
-                    break
-            whitepoint.append(x)
+        return np.array(blackpoint), np.array(whitepoint)
+
+    elif mode == 'perceptive':
+        assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
+        R, G, B = array.transpose(2, 0, 1)
+        L = np.array(img.convert(mode='L'), dtype=np.float32)  # faster than np.mean or python
+        L_bp = L.min()
+        L = (L - L_bp) * (255 / (255 - L_bp)) + 0.5
+        pixel_black = pixel_black if pixel_black.shape == (3,) else pixel_black.repeat(3)
+        pixel_white = pixel_white if pixel_white.shape == (3,) else pixel_white.repeat(3)
+        n_pixel = img.height * img.width
+        blackpoint, whitepoint = [], []
+
+        # Process RGB channels in parallel because numpy weighted histogram is slow
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [
+                executor.submit(process_channel, pix_black, pix_white, channel, L, n_pixel)
+                for pix_black, pix_white, channel in zip(pixel_black, pixel_white, (R, G, B))]
+
+            # Gather results in the order of submission
+            for future in futures:
+                black, white = future.result()
+                blackpoint.append(black)
+                whitepoint.append(white)
 
         return np.array(blackpoint), np.array(whitepoint)
 
@@ -307,19 +347,8 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
         for pix_black, pix_white, channel in zip(pixel_black, pixel_white, channels):
             hist = channel.histogram()
 
-            accsum = 0
-            for x in range(256):
-                accsum += hist[x]
-                if accsum > n_pixel * pix_black:
-                    break
-            blackpoint.append(x)
-
-            accsum = 0
-            for x in range(255, -1, -1):
-                accsum += hist[x]
-                if accsum > n_pixel * pix_white:
-                    break
-            whitepoint.append(x)
+            blackpoint.append(get_channel_cutoff(hist, thresh=pix_black, upper=False))
+            whitepoint.append(get_channel_cutoff(hist, thresh=pix_white, upper=True))
 
         return np.array(blackpoint), np.array(whitepoint)
 
@@ -341,6 +370,18 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
             whitepoint.append(np.argmax(cumsum > (1 - pix_white)))
 
         return np.array(blackpoint), np.array(whitepoint)
+
+
+def process_channel(pix_black, pix_white, channel, L, norm=None):
+    weight = np.where(channel >= L, 1, channel / L)
+    hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)
+    norm = norm or channel.shape[0] * channel.shape[1]
+
+    # Calculate blackpoint and whitepoint for this channel
+    blackpoint = get_channel_cutoff(hist, thresh=pix_black, upper=False, norm=norm)
+    whitepoint = get_channel_cutoff(hist, thresh=pix_white, upper=True, norm=norm)
+
+    return blackpoint, whitepoint
 
 
 def blend(a, b, alpha=1.0):
