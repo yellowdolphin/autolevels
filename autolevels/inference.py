@@ -3,6 +3,7 @@ from shutil import rmtree
 from subprocess import run
 import os
 import numpy as np
+import h5py
 
 
 def monotonize(curves):
@@ -112,9 +113,26 @@ def free_curve_map_image(img, curves):
         img = img[:, :, None]
         curves = curves.mean(axis=0, keepdims=True)
 
+    # Optionally export curves
+    filename = Path('.autolevels_exported_curves.h5')
+    dataset_name = '001'
+    if filename.exists():
+        with h5py.File(filename, 'a') as hdf_file:
+            if dataset_name in hdf_file:
+                # Resize the existing dataset
+                existing_dataset = hdf_file[dataset_name]
+                existing_size = existing_dataset.shape[0]
+                new_size = existing_size + curves.shape[0]
+                existing_dataset.resize(new_size, axis=0)
+                existing_dataset[existing_size:] = curves
+            else:
+                # Create a new dataset, resizable along axis 0
+                hdf_file.create_dataset(dataset_name, data=curves, maxshape=(None, 256))
+
+
     transformed = np.empty(img.shape, dtype=curves.dtype)
 
-    # map each channel using fancy indexing
+    # Map each channel using fancy indexing
     for i, curve in enumerate(curves):
         transformed[:, :, i] = curve[img[:, :, i]]
 
