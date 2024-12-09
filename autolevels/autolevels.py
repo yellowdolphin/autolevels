@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from PIL import Image, ImageFilter
+import cv2
 import piexif
 
 
@@ -544,25 +545,26 @@ def main():
             out_fn = (outdir or fn.parent) / f'{stem}{suf}'
         # TODO: check out_fn exists, add option -f to overwrite
 
-        orig_img = Image.open(fn)
-        img = orig_img.copy()
-        array = None
+        pil_img = Image.open(fn)
+        array = cv2.cvtColor(cv2.imread(fn, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+        out_48bit = (array.dtype == np.dtype('uint16')) and (out_fn.suffix.lower()[1:4] in {'png', 'tif'})
 
         # Handle image modes
-        img_alpha = img.getchannel('A') if img.mode.endswith('A') else None
-        if img.mode == 'RGBA':
-            r, g, b, img_alpha = img.split()
+        img_alpha = None
+        if pil_img.mode == 'RGBA':
+            img_alpha = pil_img.getchannel('A')
+            r, g, b, img_alpha = pil_img.split()
             transparency = np.array(img_alpha).min() < 255
             if transparency:
                 print("Warning: this is an RGBA image with transparency, assuming white canvas.")
                 canvas = Image.new('RGB', img.size, (255, 255, 255))
                 canvas.paste(img, mask=img_alpha)
-                img = canvas
+                array = np.array(canvas)
                 del canvas, r, g, b
             else:
-                img = Image.merge('RGB', (r, g, b))
+                array = np.array(Image.merge('RGB', (r, g, b)))
                 del r, g, b
-        if (img.mode == 'L') and (arg.saturation != 1):
+        if (pil_img.mode == 'L') and (arg.saturation != 1):
             print(f'Warning: "{fn}" is gray scale image, ignoring saturation options.')
             saturation = 1
         else:
@@ -570,7 +572,6 @@ def main():
 
         # Adjust saturation before anything else
         if (saturation != 1) and arg.saturation_first:
-            array = np.array(img, dtype=np.float32) if array is None else array
             L = grayscale(array)
             array = blend(array, L, saturation)
 
@@ -580,33 +581,17 @@ def main():
                 print(f'{fn} -> {out_fn}')
                 continue
 
-            # Resize image for model input
-            if array is None:
-                array_8 = np.array(img)
-                resized = img.resize(model.input_size)
-                quantization_noise = None
-            else:
-                array_8 = array.clip(0, 255).astype('uint8')
-                resized = Image.fromarray(array_8, mode=(img.mode or 'RGB')).resize(model.input_size)
-                quantization_noise = array_8.astype(np.float32) - array  # range: (-1, 0]
-                plus_one = np.clip(array + 1, 0, 255).astype('uint8')
-
-            resized = np.array(resized.convert('RGB'), dtype=np.float32)
+            resized = cv2.resize(array, (384, 384)[::-1])  # uint16 or uint8
             free_curve = model(resized)
 
-            array = free_curve_map_image(array_8, free_curve)
-
-            # Eliminate quantization noise
-            if quantization_noise is not None:
-                transformed_plus_one = free_curve_map_image(plus_one, free_curve)
-                transformed_noise = (transformed_plus_one - array) * quantization_noise  # negative
-                array -= transformed_noise
+            array = free_curve_map_image(array, free_curve)  # float32, range (0, 1)
 
             if arg.simulate:
                 print(f'{fn} -> {out_fn}')
                 continue
 
         else:
+            ### TODO: handle uint16, leave float32 array with range (0, 1)
             array = np.array(img, dtype=np.float32) if array is None else array
             blackpoint, whitepoint = get_blackpoint_whitepoint(array, sample_mode, blackclip, whiteclip)
 
@@ -659,57 +644,62 @@ def main():
         # Gamma correction
         if (gamma != 1).any():
             array = array.clip(0, None)
-            array = 255 * np.power(array / 255, gamma)
+            array = np.power(array, gamma)
 
         # Adjust saturation
         if (saturation != 1 and not (arg.saturation_before_gamma or arg.saturation_first)):
             L = grayscale(array)
             array = blend(array, L, saturation)
 
-        array = array.round().clip(0, 255).astype('uint8')
-
-        img = Image.fromarray(array)
-
-        # Merge with alpha (RGBA images only)
-        if img_alpha is not None:
-            img = Image.merge('RGBA', [*img.split(), img_alpha])
-
-        # Add attributes required to preserve JPEG quality
-        for attr in 'format layer layers quantization'.split():
-            value = getattr(orig_img, attr, None)
-            if value is not None:
-                setattr(img, attr, value)
-
-        # Add other attributes
-        for attr in 'info'.split():
-            value = getattr(orig_img, attr, None)
-            if value is not None:
-                setattr(img, attr, value)
-
-        # Configure save options
-        kwargs = {}
-        if orig_img.format == 'JPEG':
-            kwargs['quality'] = 'keep'
-        elif orig_img.format == 'TIFF':
-            kwargs['compression'] = orig_img.info['compression'] if 'compression' in orig_img.info else 'raw'
-            if kwargs['compression'] == 'jpeg':
-                kwargs['quality'] = DEFAULT_QUALITY  # 'keep' is invalid, TIFF stores no JPEG quality
-
-        # Make reproducible, leave CLI args in JPEG comment
-        if getattr(arg, 'cli_params', None):
-            cli_params = arg.cli_params
+        if out_48bit:
+            array = (array * 65535).round().clip(0, 65535).astype('uint16')
+            cv2.imwrite(out_fn, cv2.cvtColor(array, cv2.COLOR_RGB2BGR))
+            ## TODO: check if possible to add comment, exif
         else:
-            cli_params = purge_cli_params(sys.argv[1:], fn)
-        comment = make_comment(orig_img, __version__, cli_params)
+            array = (array * 255).round().clip(0, 255).astype('uint8')
 
-        # Save original format, regardless of output file extension (TODO: handle other formats and their metadata)
-        img.save(out_fn, format=orig_img.format, comment=comment, optimize=True, **kwargs)
+            img = Image.fromarray(array)
 
-        # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
-        # Hence, this is the only way to fully preserve the entire EXIF:
-        if hasattr(orig_img, 'info') and 'exif' in orig_img.info:
-            piexif.transplant(str(fn), str(out_fn))
+            # Merge with alpha (RGBA images only)
+            if img_alpha is not None:
+                img = Image.merge('RGBA', [*img.split(), img_alpha])
 
+            # Add attributes required to preserve JPEG quality
+            for attr in 'format layer layers quantization'.split():
+                value = getattr(pil_img, attr, None)
+                if value is not None:
+                    setattr(img, attr, value)
+
+            # Add other attributes
+            for attr in 'info'.split():
+                value = getattr(pil_img, attr, None)
+                if value is not None:
+                    setattr(img, attr, value)
+
+            # Configure save options
+            kwargs = {}
+            if pil_img.format == 'JPEG':
+                kwargs['quality'] = 'keep'
+            elif pil_img.format == 'TIFF':
+                kwargs['compression'] = pil_img.info['compression'] if 'compression' in pil_img.info else 'raw'
+                if kwargs['compression'] == 'jpeg':
+                    kwargs['quality'] = DEFAULT_QUALITY  # 'keep' is invalid, TIFF stores no JPEG quality
+
+            # Make reproducible, leave CLI args in JPEG comment
+            if getattr(arg, 'cli_params', None):
+                cli_params = arg.cli_params
+            else:
+                cli_params = purge_cli_params(sys.argv[1:], fn)
+            comment = make_comment(pil_img, __version__, cli_params)
+
+            # Save original format, regardless of output file extension (TODO: handle other formats and their metadata)
+            img.save(out_fn, format=pil_img.format, comment=comment, optimize=True, **kwargs)
+
+            # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
+            # Hence, this is the only way to fully preserve the entire EXIF:
+            if hasattr(pil_img, 'info') and 'exif' in pil_img.info:
+                piexif.transplant(str(fn), str(out_fn))
+        
         # Logging
         infos = [f'{fn} -> {out_fn}']
         if not arg.model and (blackpoint != target_black).any():

@@ -24,7 +24,9 @@ def get_model(filename):
 
         def model(inputs):
             # channels-first, add batch dim, floatify
-            inputs = torch.tensor(inputs.transpose(2, 0, 1)[None, ...], dtype=torch.float32) / 255
+            assert inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}, f'input type {inputs.dtype} not supported'
+            maxvalue = 65535 if inputs.dtype == np.uint16 else 255
+            inputs = torch.tensor(inputs.transpose(2, 0, 1)[None, ...], dtype=torch.float32) / maxvalue
             preds = np.array(scripted_model(inputs))
 
             # post-process preds
@@ -70,7 +72,9 @@ def get_model(filename):
 
         def model(inputs):
             # add batch dim, floatify
-            inputs = tf.constant(inputs[None, ...], dtype=tf.float32) / 255
+            assert inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}, f'input type {inputs.dtype} not supported'
+            maxvalue = 65535 if inputs.dtype == np.uint16 else 255
+            inputs = tf.constant(inputs[None, ...], dtype=tf.float32) / maxvalue
             preds = tf_model.predict_on_batch(inputs)  # already returns numpy
 
             # post-process preds
@@ -103,7 +107,7 @@ def get_ensemble(filenames):
 
 def free_curve_map_image(img, curves):
     assert curves.dtype == np.float32, str(curves.dtype)  # float32
-    assert img.dtype == np.uint8, f"img.dtype: {img.dtype}"
+    assert img.dtype in {np.dtype('uint8'), np.dtype('uint16')}, f"img.dtype: {img.dtype} not supported"
     assert (curves >= 0).all(), f'curves.min: {curves.min()}'
     assert (curves <= 1).all(), f'curves.max: {curves.max()}'
     curves = curves.reshape(3, 256)
@@ -129,6 +133,11 @@ def free_curve_map_image(img, curves):
                 # Create a new dataset, resizable along axis 0
                 hdf_file.create_dataset(dataset_name, data=curves, maxshape=(None, 256))
 
+    # Upsample curves for uint16 images
+    if img.dtype == np.uint16:
+        x_original = np.linspace(0, 1, 256)
+        x_new = np.linspace(0, 1, 65536)
+        curves = np.stack([np.interp(x_new, x_original, curve) for curve in curves])
 
     transformed = np.empty(img.shape, dtype=curves.dtype)
 
@@ -140,4 +149,4 @@ def free_curve_map_image(img, curves):
     if transformed.shape[2] == 1:
         transformed = transformed[:, :, 0]
 
-    return transformed * 255  # return as np.float32
+    return transformed  # return as np.float32 (0, 1)
