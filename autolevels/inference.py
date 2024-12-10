@@ -73,7 +73,7 @@ def get_model(filename):
         def model(inputs):
             # add batch dim, floatify
             assert inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}, f'input type {inputs.dtype} not supported'
-            maxvalue = 65535 if inputs.dtype == np.uint16 else 255
+            maxvalue = 65535 if inputs.dtype == np.dtype('uint16') else 255
             inputs = tf.constant(inputs[None, ...], dtype=tf.float32) / maxvalue
             preds = tf_model.predict_on_batch(inputs)  # already returns numpy
 

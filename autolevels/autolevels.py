@@ -276,11 +276,22 @@ def get_channel_cutoff(hist, thresh, upper=False, norm=None):
             return bin
 
 
-def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
+def get_blackpoint_whitepoint(array, maxvalue, mode, pixel_black, pixel_white):
+    """Returns black point and white point
+
+    uint16 images are converted to uint8 for fast histogram evaluation.
+    """
     # 3x3 or 5x5 envelope
     SMOOTH = ImageFilter.SMOOTH_MORE if mode == 'smoother' else ImageFilter.SMOOTH
 
-    img = Image.fromarray(array.clip(0, 255).astype('uint8'))
+    # convert to PIL.Image
+    if array.dtype == np.dtype('uint16'):
+        img = Image.fromarray((array.astype('float32') * (255 / 65535)).clip(0, 255).astype('uint8'))
+    elif array.dtype in {np.dtype('float32'), np.dtype('float64')}:
+        img = Image.fromarray((array * (255 / maxvalue)).clip(0, 255).astype('uint8'))
+    elif array.dtype == np.dtype('uint8'):
+        img = Image.fromarray(array)
+
     if (mode == 'perceptive') and (img.mode == 'L'):
         mode = 'hist'  # equivalent for gray scale images
 
@@ -314,7 +325,6 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
 
     elif mode == 'perceptive':
         assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
-        R, G, B = array.transpose(2, 0, 1)
         L = np.array(img.convert(mode='L'), dtype=np.float32)  # faster than np.mean or python
         L_bp = L.min()
         L = (L - L_bp) * (255 / (255 - L_bp)) + 0.5
@@ -324,6 +334,7 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
         blackpoint, whitepoint = [], []
 
         # Process RGB channels in parallel because numpy weighted histogram is slow
+        R, G, B = img.split()[:3]
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = [
                 executor.submit(process_channel, pix_black, pix_white, channel, L, n_pixel)
@@ -547,23 +558,27 @@ def main():
 
         pil_img = Image.open(fn)
         array = cv2.cvtColor(cv2.imread(fn, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+        maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255
         out_48bit = (array.dtype == np.dtype('uint16')) and (out_fn.suffix.lower()[1:4] in {'png', 'tif'})
 
         # Handle image modes
         img_alpha = None
         if pil_img.mode == 'RGBA':
             img_alpha = pil_img.getchannel('A')
-            r, g, b, img_alpha = pil_img.split()
             transparency = np.array(img_alpha).min() < 255
             if transparency:
-                print("Warning: this is an RGBA image with transparency, assuming white canvas.")
-                canvas = Image.new('RGB', img.size, (255, 255, 255))
-                canvas.paste(img, mask=img_alpha)
+                if maxvalue > 255:
+                    print("Warning: this is an RGBA image with transparency. "
+                          "Flatening to canvas is necessary for any color corrections, "
+                          "depth will be lowered to 8-bit. Assuming white canvas.")
+                else:
+                    print("Warning: this is an RGBA image with transparency, assuming white canvas.")
+                r, g, b, img_alpha = pil_img.split()
+                canvas = Image.new('RGB', pil_img.size, (255, 255, 255))
+                canvas.paste(pil_img, mask=img_alpha)
                 array = np.array(canvas)
+                out_48bit = False
                 del canvas, r, g, b
-            else:
-                array = np.array(Image.merge('RGB', (r, g, b)))
-                del r, g, b
         if (pil_img.mode == 'L') and (arg.saturation != 1):
             print(f'Warning: "{fn}" is gray scale image, ignoring saturation options.')
             saturation = 1
@@ -591,9 +606,7 @@ def main():
                 continue
 
         else:
-            ### TODO: handle uint16, leave float32 array with range (0, 1)
-            array = np.array(img, dtype=np.float32) if array is None else array
-            blackpoint, whitepoint = get_blackpoint_whitepoint(array, sample_mode, blackclip, whiteclip)
+            blackpoint, whitepoint = get_blackpoint_whitepoint(array, maxvalue, sample_mode, blackclip, whiteclip)
 
             # Set targets, limit shifts in black/white point for low-contrast images
             target_black = np.array(arg.blackpoint, dtype=int)
@@ -630,11 +643,15 @@ def main():
 
             shift = (blackpoint - black) * white / (white - black)
             stretch_factor = white / (whitepoint - shift)
-            array = (array - shift) * stretch_factor
+
+            array = array.astype(np.float32)
+            array = (array - shift * (maxvalue / 255)) * stretch_factor
             if (shift < 0).any():
                 # small gamma results in a low black point => upper limit for target_black!
                 channels = [name for name, s in zip('RGB', shift) if s < 0]
                 print(f'{fn} WARNING: lower black point or increase gamma for channel(s)', *channels)
+
+            array /= maxvalue  # range (0, 1)
 
         # Adjust saturation before gamma (deprecated)
         if (saturation != 1 and arg.saturation_before_gamma and not arg.saturation_first):
