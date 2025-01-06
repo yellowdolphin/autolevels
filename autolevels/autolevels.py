@@ -473,8 +473,12 @@ def make_comment(img, version, cli_params):
 
     comments = []
 
+    # Keep existing comments
     if hasattr(img, 'info') and 'comment' in img.info:
-        comments.append(img.info['comment'].decode())
+        try:
+            comments.append(img.info['comment'].decode())
+        except UnicodeDecodeError:
+            pass  # drop non-text comments
 
     comments.append(f'autolevels {version}, params: {cli_params}')
 
