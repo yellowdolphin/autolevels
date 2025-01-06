@@ -7,13 +7,14 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageCms
+
 import cv2
 import piexif
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
-DEFAULT_QUALITY = 80
+DEFAULT_QUALITY = 90
 REPRODUCIBLE = {'blackpoint', 'whitepoint', 'blackclip', 'whiteclip', 'maxblack', 'minwhite', 'max_blackshift',
                 'max_whiteshift', 'mode', 'gamma', 'model', 'saturation', 'saturation_first', 'saturation_before_gamma'}
 
@@ -143,6 +144,15 @@ def get_parser():
                                 'The latter must be the output of a compatible program version. '
                                 'Example: autolevels --reproduce processed_image.jpg '
                                 'other_images/*.jpg'))
+    parser.add_argument(
+        '--icc-profile', '--icc', default=None, type=str, help=(
+                                'Specify ICC file for input image(s). If provided, color space will be '
+                                'converted to sRGB after all corrections. This feature disables 48-bit output.'))
+    parser.add_argument(
+        '--reset-icc', action='store_true', help=(
+                                'The input image is first converted from sRGB to the profile specified with the '
+                                '--icc-profile option, then all corrections are applied, then the image is converted '
+                                'back to sRGB before saving. This feature disables 48-bit processing.'))
     parser.add_argument(
         '--version', action='store_true', help='Print version information and exit')
 
@@ -416,6 +426,23 @@ def grayscale(rgb, mode='itu', keep_channels=False):
     return np.stack([L, L, L]) if keep_channels else L[:, :, None]
 
 
+def get_out_format(filename, pil_img):
+    """Infer format from filename extension or use input format"""
+    ext = Path(filename).suffix.lower()
+    pil_extensions = Image.registered_extensions()
+    return pil_extensions.get(ext, pil_img.format)
+
+
+def estimate_jpeg_quality(pil_img):
+    """Infer quality from qantization table if found, else return default quality."""
+    if not hasattr(pil_img, 'quantization') or pil_img.quantization is None:
+        return DEFAULT_QUALITY
+    qtable = pil_img.quantization[0]
+    max_q = 100
+    m = 1.15
+    return round(max_q - np.mean(qtable) / m)
+
+
 def purge_cli_params(args, fn):
     """Return a str of all args required for the --reproduce feature"""
     impossible_args = {'--simulate', '--sandbox', '--reproduce'}  # if present, purge shouldn't be called
@@ -484,6 +511,11 @@ def main():
     if arg.model:
         for fn in arg.model:
             assert Path(fn).exists(), f'Specified model file could not be found: {fn}'
+    if arg.icc_profile:
+        icc_file = Path(arg.icc_profile)
+        assert icc_file.exists(), f'File not found: {icc_file}'
+        icc_profile = ImageCms.getOpenProfile(str(icc_file))
+        sRGB_profile = ImageCms.createProfile('sRGB')
 
     # Input file names
     path = Path(arg.folder)
@@ -557,9 +589,21 @@ def main():
         # TODO: check out_fn exists, add option -f to overwrite
 
         pil_img = Image.open(fn)
-        array = cv2.cvtColor(cv2.imread(fn, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+        if arg.icc_profile and arg.reset_icc:
+            # Convert from sRGB to ICC profile
+            try:
+                array = np.array(ImageCms.profileToProfile(pil_img, sRGB_profile, icc_profile))
+            except ImageCms.PyCMSError as e:
+                raise ValueError(f"{e}. Probably, the ICC profile cannot be used for reverse transformation "
+                      "(missing B2A).")
+        else:
+            array = cv2.cvtColor(cv2.imread(fn, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255
-        out_48bit = (array.dtype == np.dtype('uint16')) and (out_fn.suffix.lower()[1:4] in {'png', 'tif'})
+
+        # Check conditions for 48-bit output
+        out_48bit = all((array.dtype == np.dtype('uint16'),
+                         out_fn.suffix.lower()[1:4] in {'png', 'tif'},
+                         arg.icc_profile is None))
 
         # Handle image modes
         img_alpha = None
@@ -569,7 +613,7 @@ def main():
             if transparency:
                 if maxvalue > 255:
                     print("Warning: this is an RGBA image with transparency. "
-                          "Flatening to canvas is necessary for any color corrections, "
+                          "Flatening to canvas is necessary for any corrections, "
                           "depth will be lowered to 8-bit. Assuming white canvas.")
                 else:
                     print("Warning: this is an RGBA image with transparency, assuming white canvas.")
@@ -579,6 +623,9 @@ def main():
                 array = np.array(canvas)
                 out_48bit = False
                 del canvas, r, g, b
+            else:
+                # discard empty alpha channel
+                img_alpha = None
         if (pil_img.mode == 'L') and (arg.saturation != 1):
             print(f'Warning: "{fn}" is gray scale image, ignoring saturation options.')
             saturation = 1
@@ -671,11 +718,14 @@ def main():
         if out_48bit:
             array = (array * 65535).round().clip(0, 65535).astype('uint16')
             cv2.imwrite(out_fn, cv2.cvtColor(array, cv2.COLOR_RGB2BGR))
-            ## TODO: check if possible to add comment, exif
         else:
             array = (array * 255).round().clip(0, 255).astype('uint8')
 
             img = Image.fromarray(array)
+
+            # Convert color space from ICC profile to sRGB
+            if arg.icc_profile:
+                img = ImageCms.profileToProfile(img, icc_profile, sRGB_profile)
 
             # Merge with alpha (RGBA images only)
             if img_alpha is not None:
@@ -687,20 +737,27 @@ def main():
                 if value is not None:
                     setattr(img, attr, value)
 
-            # Add other attributes
-            for attr in 'info'.split():
-                value = getattr(pil_img, attr, None)
-                if value is not None:
-                    setattr(img, attr, value)
+            # Update info attribute (PIL.Image always has one) and transfer to new image
+            pil_img.info.update(img.info)
+            setattr(img, 'info', pil_img.info)
 
             # Configure save options
             kwargs = {}
-            if pil_img.format == 'JPEG':
-                kwargs['quality'] = 'keep'
-            elif pil_img.format == 'TIFF':
-                kwargs['compression'] = pil_img.info['compression'] if 'compression' in pil_img.info else 'raw'
-                if kwargs['compression'] == 'jpeg':
-                    kwargs['quality'] = DEFAULT_QUALITY  # 'keep' is invalid, TIFF stores no JPEG quality
+            out_format = get_out_format(out_fn, img)
+            if out_format in {'JPEG'}:
+                kwargs['quality'] = 'keep' if hasattr(img, 'quantization') else DEFAULT_QUALITY
+            elif (img.format == 'JPEG') and out_format in {'TIFF'}:
+                # Try to preserve input image JPEG quality empirically (TIFF files are larger)
+                kwargs['compression'] = 'jpeg'
+                jpeg_quality = estimate_jpeg_quality(img)
+                kwargs['quality'] = max(24, 24 + round((jpeg_quality - 44) * (100 - 24) / (100 - 44)))
+            elif out_format == 'TIFF':
+                # Keep input image compression if available
+                kwargs['compression'] = img.info.get('compression', 'raw')
+            if 'icc_profile' in img.info and out_format in {'JPEG'}:
+                kwargs['icc_profile'] = img.info.get('icc_profile')
+            if 'dpi' in img.info and out_format in {'JPEG', 'TIFF', 'PNG'}:
+                kwargs['dpi'] = tuple(round(x) for x in img.info['dpi'])
 
             # Make reproducible, leave CLI args in JPEG comment
             if getattr(arg, 'cli_params', None):
@@ -709,14 +766,19 @@ def main():
                 cli_params = purge_cli_params(sys.argv[1:], fn)
             comment = make_comment(pil_img, __version__, cli_params)
 
-            # Save original format, regardless of output file extension (TODO: handle other formats and their metadata)
-            img.save(out_fn, format=pil_img.format, comment=comment, optimize=True, **kwargs)
+            try:
+                # Let PIL derive file format from extension
+                img.save(out_fn, comment=comment, optimize=True, **kwargs)
+            except ValueError as e:
+                # If that fails, save in original format
+                print(f"{e}, saving in {img.format}.")
+                img.save(out_fn, format=img.format, comment=comment, optimize=True, **kwargs)
 
             # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
             # Hence, this is the only way to fully preserve the entire EXIF:
-            if hasattr(pil_img, 'info') and 'exif' in pil_img.info:
+            if 'exif' in pil_img.info:
                 piexif.transplant(str(fn), str(out_fn))
-        
+
         # Logging
         infos = [f'{fn} -> {out_fn}']
         if not arg.model and (blackpoint != target_black).any():
