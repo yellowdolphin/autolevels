@@ -491,11 +491,11 @@ def main():
 
     if arg.version:
         print(f'AutoLevels version {__version__}')
-        exit()
+        return
 
     if not arg.files:
         parser.print_usage()
-        exit('No files specified')
+        return 'No files specified'
 
     # Post-process arg
     if arg.reproduce:
