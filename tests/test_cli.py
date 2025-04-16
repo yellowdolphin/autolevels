@@ -1,11 +1,34 @@
 import subprocess
 import pytest
 from pathlib import Path
+from PIL import ImageCms
+import numpy as np
+import cv2
+
 
 # Define path to the test image
 TEST_IMAGE = 'images/lübeck.jpg'
 DEFAULT_OUTPUT_IMAGE_PATH = Path('images/lübeck_al.jpg')
 MODEL = 'models/free_test.pt'
+
+# Create and save an sRGB ICC profile
+ICC_PROFILE = "images/sRGB.ICC"
+srgb_profile = ImageCms.createProfile("sRGB")
+srgb_profile = ImageCms.ImageCmsProfile(srgb_profile)
+with open(ICC_PROFILE, "wb") as icc_file:
+    icc_file.write(srgb_profile.tobytes())
+
+# Create a minimal 48-bit RGB image (2x2 pixels, 16-bit per channel)
+image_data = np.array([
+    [[65535, 0, 0], [0, 65535, 0]],
+    [[0, 0, 65535], [65535, 65535, 65535]]
+], dtype=np.uint16)
+
+# Save 48bit image as PNG and TIFF
+PNG_IMAGE = "images/48bit_rgb.png"
+TIFF_IMAGE = "images/48bit_rgb.tiff"
+cv2.imwrite(PNG_IMAGE, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
+cv2.imwrite(TIFF_IMAGE, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
 
 
 @pytest.fixture(autouse=True)
@@ -228,3 +251,27 @@ def test_model_option(simulate):
     result = run_autolevels(f'{simulate} --outdir images --model {MODEL} -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+
+
+@pytest.mark.parametrize("simulate", ['--simulate', ''])
+def test_48bit_images(simulate):
+    """Test --model option with 48bit images."""
+    for fn in (PNG_IMAGE, TIFF_IMAGE):
+        output_image_path = Path(fn).parent / (Path(fn).stem + '_al' + Path(fn).suffix)
+        Path(output_image_path).unlink(missing_ok=True)
+        result = run_autolevels(f'{simulate} --outdir images --model {MODEL} -- {fn}')
+        assert result.returncode == 0
+        assert output_image_path.exists() != bool(simulate)
+        Path(output_image_path).unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("simulate", ['--simulate', ''])
+def test_icc_option(simulate):
+    """Test --icc-profile option with 48bit images."""
+    for fn in (PNG_IMAGE, TIFF_IMAGE):
+        output_image_path = Path(fn).parent / (Path(fn).stem + '_al.jpg')
+        Path(output_image_path).unlink(missing_ok=True)
+        result = run_autolevels(f'{simulate} --outdir images --outsuffix _al.jpg --icc-profile {ICC_PROFILE} -- {fn}')
+        assert result.returncode == 0
+        assert output_image_path.exists() != bool(simulate)
+        Path(output_image_path).unlink(missing_ok=True)

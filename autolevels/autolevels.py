@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.0.1'
+__version__ = '1.1.0'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -7,12 +7,14 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageCms
+
+import cv2
 import piexif
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
-DEFAULT_QUALITY = 80
+DEFAULT_QUALITY = 90
 REPRODUCIBLE = {'blackpoint', 'whitepoint', 'blackclip', 'whiteclip', 'maxblack', 'minwhite', 'max_blackshift',
                 'max_whiteshift', 'mode', 'gamma', 'model', 'saturation', 'saturation_first', 'saturation_before_gamma'}
 
@@ -143,6 +145,15 @@ def get_parser():
                                 'Example: autolevels --reproduce processed_image.jpg '
                                 'other_images/*.jpg'))
     parser.add_argument(
+        '--icc-profile', '--icc', default=None, type=str, help=(
+                                'Specify ICC file for input image(s). If provided, color space will be '
+                                'converted to sRGB after all corrections. This feature disables 48-bit output.'))
+    parser.add_argument(
+        '--reset-icc', action='store_true', help=(
+                                'The input image is first converted from sRGB to the profile specified with the '
+                                '--icc-profile option, then all corrections are applied, then the image is converted '
+                                'back to sRGB before saving. This feature disables 48-bit processing.'))
+    parser.add_argument(
         '--version', action='store_true', help='Print version information and exit')
 
     parser.add_argument(
@@ -157,7 +168,8 @@ def extract_arg(filename, parser):
     old_namespace = parser.parse_args()
 
     filename = Path(filename)
-    assert filename.exists(), f'No file {filename}'
+    if not filename.exists():
+        return f'Error: no file {filename}'
 
     img = Image.open(filename)
 
@@ -184,7 +196,8 @@ def extract_arg(filename, parser):
 def merge_args(*, current_arg, extracted_arg):
     """Returns updated `current_arg` Namespace with reproducible parameters from `extracted_arg`."""
     for name in REPRODUCIBLE:
-        assert name in current_arg, f'WARNING: foreign parameter {name}, update reproducible_params!'
+        if name not in current_arg:
+            return f'WARNING: foreign parameter {name}, update reproducible_params!'
         setattr(current_arg, name, getattr(extracted_arg, name))
     current_arg.cli_params = extracted_arg.cli_params
     return current_arg
@@ -275,11 +288,22 @@ def get_channel_cutoff(hist, thresh, upper=False, norm=None):
             return bin
 
 
-def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
+def get_blackpoint_whitepoint(array, maxvalue, mode, pixel_black, pixel_white):
+    """Returns black point and white point
+
+    uint16 images are converted to uint8 for fast histogram evaluation.
+    """
     # 3x3 or 5x5 envelope
     SMOOTH = ImageFilter.SMOOTH_MORE if mode == 'smoother' else ImageFilter.SMOOTH
 
-    img = Image.fromarray(array.clip(0, 255).astype('uint8'))
+    # convert to PIL.Image
+    if array.dtype == np.dtype('uint16'):
+        img = Image.fromarray((array.astype('float32') * (255 / 65535)).clip(0, 255).astype('uint8'))
+    elif array.dtype in {np.dtype('float32'), np.dtype('float64')}:
+        img = Image.fromarray((array * (255 / maxvalue)).clip(0, 255).astype('uint8'))
+    elif array.dtype == np.dtype('uint8'):
+        img = Image.fromarray(array)
+
     if (mode == 'perceptive') and (img.mode == 'L'):
         mode = 'hist'  # equivalent for gray scale images
 
@@ -289,7 +313,8 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
         return array.min(axis=(0, 1)), array.max(axis=(0, 1))
 
     elif mode == 'perceptive_serial':
-        assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
+        if img.mode != 'RGB':
+            return f'Error: image mode "{img.mode}" not supported by perceptive sampling mode'
         R, G, B = array.transpose(2, 0, 1)
         L = np.array(img.convert(mode='L'), dtype=np.float32)  # faster than np.mean or python
         L_bp = L.min()
@@ -312,8 +337,8 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
         return np.array(blackpoint), np.array(whitepoint)
 
     elif mode == 'perceptive':
-        assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
-        R, G, B = array.transpose(2, 0, 1)
+        if img.mode != 'RGB':
+            return f'Error: image mode "{img.mode}" not supported by perceptive sampling mode'
         L = np.array(img.convert(mode='L'), dtype=np.float32)  # faster than np.mean or python
         L_bp = L.min()
         L = (L - L_bp) * (255 / (255 - L_bp)) + 0.5
@@ -323,6 +348,7 @@ def get_blackpoint_whitepoint(array, mode, pixel_black, pixel_white):
         blackpoint, whitepoint = [], []
 
         # Process RGB channels in parallel because numpy weighted histogram is slow
+        R, G, B = img.split()[:3]
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = [
                 executor.submit(process_channel, pix_black, pix_white, channel, L, n_pixel)
@@ -404,6 +430,23 @@ def grayscale(rgb, mode='itu', keep_channels=False):
     return np.stack([L, L, L]) if keep_channels else L[:, :, None]
 
 
+def get_out_format(filename, pil_img):
+    """Infer format from filename extension or use input format"""
+    ext = Path(filename).suffix.lower()
+    pil_extensions = Image.registered_extensions()
+    return pil_extensions.get(ext, pil_img.format)
+
+
+def estimate_jpeg_quality(pil_img):
+    """Infer quality from qantization table if found, else return default quality."""
+    if not hasattr(pil_img, 'quantization') or pil_img.quantization is None:
+        return DEFAULT_QUALITY
+    qtable = pil_img.quantization[0]
+    max_q = 100
+    m = 1.15
+    return round(max_q - np.mean(qtable) / m)
+
+
 def purge_cli_params(args, fn):
     """Return a str of all args required for the --reproduce feature"""
     impossible_args = {'--simulate', '--sandbox', '--reproduce'}  # if present, purge shouldn't be called
@@ -434,25 +477,35 @@ def make_comment(img, version, cli_params):
 
     comments = []
 
+    # Keep existing comments
     if hasattr(img, 'info') and 'comment' in img.info:
-        comments.append(img.info['comment'].decode())
+        try:
+            comments.append(img.info['comment'].decode())
+        except UnicodeDecodeError:
+            pass  # drop non-text comments
 
     comments.append(f'autolevels {version}, params: {cli_params}')
 
     return '\n'.join(comments)
 
 
-def main():
+def main(callback=None):
+    """Pass callback when processing multiple files with a curve model.
+
+    callback (callable): call when finishing a file, pass input_path (str), True, info_str
+    If error occurs: pass input_path (str), False, error message (str) to proceed or
+    return an error message to abort.
+    """
     parser = get_parser()
     arg = parser.parse_args()
 
     if arg.version:
         print(f'AutoLevels version {__version__}')
-        exit()
+        return
 
     if not arg.files:
         parser.print_usage()
-        exit('No files specified')
+        return 'No files specified'
 
     # Post-process arg
     if arg.reproduce:
@@ -467,17 +520,27 @@ def main():
     whiteclip = np.array(arg.whiteclip, dtype=float)
     min_white = np.array(arg.minwhite, dtype=int)
     max_whiteshift = np.array(arg.max_whiteshift, dtype=int)
-    assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
+    if not all(g > 0 for g in arg.gamma):
+        return f'Error: invalid gamma {arg.gamma}, must be positive'
     gamma = 1 / np.array(arg.gamma, dtype=float)
     if arg.model:
         for fn in arg.model:
-            assert Path(fn).exists(), f'Specified model file could not be found: {fn}'
+            if not Path(fn).exists():
+                return f'Error: Specified model file could not be found: {fn}'
+    if arg.icc_profile:
+        icc_file = Path(arg.icc_profile)
+        if not icc_file.exists():
+            return f'Error: file not found: {icc_file}'
+        icc_profile = ImageCms.getOpenProfile(str(icc_file))
+        sRGB_profile = ImageCms.createProfile('sRGB')
 
     # Input file names
     path = Path(arg.folder)
-    assert path.exists(), f'Folder "{path}" does not exist.'
+    if not path.exists():
+        return f'Error: folder "{path}" does not exist.'
     pre = arg.prefix
-    assert not pre.startswith(('.', '/')), f'Unsecure prefix "{pre}", use --folder to specify the path'
+    if pre.startswith(('.', '/')):
+        return f'Error: unsecure prefix "{pre}", use --folder to specify the path'
     suf = arg.suffix
 
     if arg.fstring:
@@ -501,12 +564,12 @@ def main():
                     fns.extend(matches)
                 else:
                     fns.append(path / parent / name)
-            except IndexError:
-                print('path:', path)
-                print('pattern:', x)
-                raise
+            except Exception as e:
+                print(e)
+                return f'No matching files found for {x}'
 
-    assert fns, f'No matching files found in "{path}"'
+    if not fns:
+        return f'No matching files found in "{path}"'
 
     # Output file options
     outdir = Path(arg.outdir) if arg.outdir else Path('.')
@@ -525,6 +588,12 @@ def main():
 
     # Process input files
     for i, fn in enumerate(fns):
+        # Skip non-existing
+        if not fn.exists():
+            print(f"Error: {fn} not found - skipping")
+            if callback is not None:
+                callback(str(fn), False, f'Error: {fn} not found - skipping')
+            continue
 
         # Decide output file name
         if arg.outfstring:
@@ -544,25 +613,53 @@ def main():
             out_fn = (outdir or fn.parent) / f'{stem}{suf}'
         # TODO: check out_fn exists, add option -f to overwrite
 
-        orig_img = Image.open(fn)
-        img = orig_img.copy()
-        array = None
+        # Open image if possible
+        try:
+            pil_img = Image.open(fn)
+        except Exception as e:
+            print(f'Error: skipping {fn}, {e}')
+            if callback is not None:
+                callback(str(fn), False, f'Error: broken or unsupported image format (skipping) {fn}')
+            continue
+
+        if arg.icc_profile and arg.reset_icc:
+            # Convert from sRGB to ICC profile
+            try:
+                array = np.array(ImageCms.profileToProfile(pil_img, sRGB_profile, icc_profile))
+            except ImageCms.PyCMSError as e:
+                print(e, "ICC probably has no B2A")
+                return "This ICC profile cannot be used for reverse transformation."
+        else:
+            array = cv2.cvtColor(cv2.imread(fn, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+        maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255
+
+        # Check conditions for 48-bit output
+        out_48bit = all((array.dtype == np.dtype('uint16'),
+                         out_fn.suffix.lower()[1:4] in {'png', 'tif'},
+                         arg.icc_profile is None))
 
         # Handle image modes
-        img_alpha = img.getchannel('A') if img.mode.endswith('A') else None
-        if img.mode == 'RGBA':
-            r, g, b, img_alpha = img.split()
+        img_alpha = None
+        if pil_img.mode == 'RGBA':
+            img_alpha = pil_img.getchannel('A')
             transparency = np.array(img_alpha).min() < 255
             if transparency:
-                print("Warning: this is an RGBA image with transparency, assuming white canvas.")
-                canvas = Image.new('RGB', img.size, (255, 255, 255))
-                canvas.paste(img, mask=img_alpha)
-                img = canvas
+                if maxvalue > 255:
+                    print("Warning: this is an RGBA image with transparency. "
+                          "Flatening to canvas is necessary for any corrections, "
+                          "depth will be lowered to 8-bit. Assuming white canvas.")
+                else:
+                    print("Warning: this is an RGBA image with transparency, assuming white canvas.")
+                r, g, b, img_alpha = pil_img.split()
+                canvas = Image.new('RGB', pil_img.size, (255, 255, 255))
+                canvas.paste(pil_img, mask=img_alpha)
+                array = np.array(canvas)
+                out_48bit = False
                 del canvas, r, g, b
             else:
-                img = Image.merge('RGB', (r, g, b))
-                del r, g, b
-        if (img.mode == 'L') and (arg.saturation != 1):
+                # discard empty alpha channel
+                img_alpha = None
+        if (pil_img.mode == 'L') and (arg.saturation != 1):
             print(f'Warning: "{fn}" is gray scale image, ignoring saturation options.')
             saturation = 1
         else:
@@ -570,7 +667,6 @@ def main():
 
         # Adjust saturation before anything else
         if (saturation != 1) and arg.saturation_first:
-            array = np.array(img, dtype=np.float32) if array is None else array
             L = grayscale(array)
             array = blend(array, L, saturation)
 
@@ -580,35 +676,17 @@ def main():
                 print(f'{fn} -> {out_fn}')
                 continue
 
-            # Resize image for model input
-            if array is None:
-                array_8 = np.array(img)
-                resized = img.resize(model.input_size)
-                quantization_noise = None
-            else:
-                array_8 = array.clip(0, 255).astype('uint8')
-                resized = Image.fromarray(array_8, mode=(img.mode or 'RGB')).resize(model.input_size)
-                quantization_noise = array_8.astype(np.float32) - array  # range: (-1, 0]
-                plus_one = np.clip(array + 1, 0, 255).astype('uint8')
-
-            resized = np.array(resized.convert('RGB'), dtype=np.float32)
+            resized = cv2.resize(array, (384, 384)[::-1])  # uint16 or uint8
             free_curve = model(resized)
 
-            array = free_curve_map_image(array_8, free_curve)
-
-            # Eliminate quantization noise
-            if quantization_noise is not None:
-                transformed_plus_one = free_curve_map_image(plus_one, free_curve)
-                transformed_noise = (transformed_plus_one - array) * quantization_noise  # negative
-                array -= transformed_noise
+            array = free_curve_map_image(array, free_curve)  # float32, range (0, 1)
 
             if arg.simulate:
                 print(f'{fn} -> {out_fn}')
                 continue
 
         else:
-            array = np.array(img, dtype=np.float32) if array is None else array
-            blackpoint, whitepoint = get_blackpoint_whitepoint(array, sample_mode, blackclip, whiteclip)
+            blackpoint, whitepoint = get_blackpoint_whitepoint(array, maxvalue, sample_mode, blackclip, whiteclip)
 
             # Set targets, limit shifts in black/white point for low-contrast images
             target_black = np.array(arg.blackpoint, dtype=int)
@@ -645,11 +723,15 @@ def main():
 
             shift = (blackpoint - black) * white / (white - black)
             stretch_factor = white / (whitepoint - shift)
-            array = (array - shift) * stretch_factor
+
+            array = array.astype(np.float32)
+            array = (array - shift * (maxvalue / 255)) * stretch_factor
             if (shift < 0).any():
                 # small gamma results in a low black point => upper limit for target_black!
                 channels = [name for name, s in zip('RGB', shift) if s < 0]
                 print(f'{fn} WARNING: lower black point or increase gamma for channel(s)', *channels)
+
+            array /= maxvalue  # range (0, 1)
 
         # Adjust saturation before gamma (deprecated)
         if (saturation != 1 and arg.saturation_before_gamma and not arg.saturation_first):
@@ -659,56 +741,76 @@ def main():
         # Gamma correction
         if (gamma != 1).any():
             array = array.clip(0, None)
-            array = 255 * np.power(array / 255, gamma)
+            array = np.power(array, gamma)
 
         # Adjust saturation
         if (saturation != 1 and not (arg.saturation_before_gamma or arg.saturation_first)):
             L = grayscale(array)
             array = blend(array, L, saturation)
 
-        array = array.round().clip(0, 255).astype('uint8')
-
-        img = Image.fromarray(array)
-
-        # Merge with alpha (RGBA images only)
-        if img_alpha is not None:
-            img = Image.merge('RGBA', [*img.split(), img_alpha])
-
-        # Add attributes required to preserve JPEG quality
-        for attr in 'format layer layers quantization'.split():
-            value = getattr(orig_img, attr, None)
-            if value is not None:
-                setattr(img, attr, value)
-
-        # Add other attributes
-        for attr in 'info'.split():
-            value = getattr(orig_img, attr, None)
-            if value is not None:
-                setattr(img, attr, value)
-
-        # Configure save options
-        kwargs = {}
-        if orig_img.format == 'JPEG':
-            kwargs['quality'] = 'keep'
-        elif orig_img.format == 'TIFF':
-            kwargs['compression'] = orig_img.info['compression'] if 'compression' in orig_img.info else 'raw'
-            if kwargs['compression'] == 'jpeg':
-                kwargs['quality'] = DEFAULT_QUALITY  # 'keep' is invalid, TIFF stores no JPEG quality
-
-        # Make reproducible, leave CLI args in JPEG comment
-        if getattr(arg, 'cli_params', None):
-            cli_params = arg.cli_params
+        if out_48bit:
+            array = (array * 65535).round().clip(0, 65535).astype('uint16')
+            cv2.imwrite(out_fn, cv2.cvtColor(array, cv2.COLOR_RGB2BGR))
         else:
-            cli_params = purge_cli_params(sys.argv[1:], fn)
-        comment = make_comment(orig_img, __version__, cli_params)
+            array = (array * 255).round().clip(0, 255).astype('uint8')
 
-        # Save original format, regardless of output file extension (TODO: handle other formats and their metadata)
-        img.save(out_fn, format=orig_img.format, comment=comment, optimize=True, **kwargs)
+            img = Image.fromarray(array)
 
-        # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
-        # Hence, this is the only way to fully preserve the entire EXIF:
-        if hasattr(orig_img, 'info') and 'exif' in orig_img.info:
-            piexif.transplant(str(fn), str(out_fn))
+            # Convert color space from ICC profile to sRGB
+            if arg.icc_profile:
+                img = ImageCms.profileToProfile(img, icc_profile, sRGB_profile)
+
+            # Merge with alpha (RGBA images only)
+            if img_alpha is not None:
+                img = Image.merge('RGBA', [*img.split(), img_alpha])
+
+            # Add attributes required to preserve JPEG quality
+            for attr in 'format layer layers quantization'.split():
+                value = getattr(pil_img, attr, None)
+                if value is not None:
+                    setattr(img, attr, value)
+
+            # Update info attribute (PIL.Image always has one) and transfer to new image
+            pil_img.info.update(img.info)
+            setattr(img, 'info', pil_img.info)
+
+            # Configure save options
+            kwargs = {}
+            out_format = get_out_format(out_fn, img)
+            if out_format in {'JPEG'}:
+                kwargs['quality'] = 'keep' if hasattr(img, 'quantization') else DEFAULT_QUALITY
+            elif (img.format == 'JPEG') and out_format in {'TIFF'}:
+                # Try to preserve input image JPEG quality empirically (TIFF files are larger)
+                kwargs['compression'] = 'jpeg'
+                jpeg_quality = estimate_jpeg_quality(img)
+                kwargs['quality'] = max(24, 24 + round((jpeg_quality - 44) * (100 - 24) / (100 - 44)))
+            elif out_format == 'TIFF':
+                # Keep input image compression if available
+                kwargs['compression'] = img.info.get('compression', 'raw')
+            if 'icc_profile' in img.info and out_format in {'JPEG'}:
+                kwargs['icc_profile'] = img.info.get('icc_profile')
+            if 'dpi' in img.info and out_format in {'JPEG', 'TIFF', 'PNG'}:
+                kwargs['dpi'] = tuple(round(x) for x in img.info['dpi'])
+
+            # Make reproducible, leave CLI args in JPEG comment
+            if getattr(arg, 'cli_params', None):
+                cli_params = arg.cli_params
+            else:
+                cli_params = purge_cli_params(sys.argv[1:], fn)
+            comment = make_comment(pil_img, __version__, cli_params)
+
+            try:
+                # Let PIL derive file format from extension
+                img.save(out_fn, comment=comment, optimize=True, **kwargs)
+            except ValueError as e:
+                # If that fails, save in original format
+                print(f"{e}, saving in {img.format}.")
+                img.save(out_fn, format=img.format, comment=comment, optimize=True, **kwargs)
+
+            # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
+            # Hence, this is the only way to fully preserve the entire EXIF:
+            if 'exif' in pil_img.info:
+                piexif.transplant(str(fn), str(out_fn))
 
         # Logging
         infos = [f'{fn} -> {out_fn}']
@@ -719,6 +821,10 @@ def main():
             low = 'low ' if (whitepoint < min_white).any() else ''
             infos.append(f'{low}white point: {whitepoint} -> {target_white.round().astype("int")}')
         print(', '.join(infos))
+
+        # Callback
+        if callback is not None:
+            callback(str(fn), True, infos)
 
 
 if __name__ == '__main__':

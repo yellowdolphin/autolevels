@@ -1,5 +1,11 @@
 # Changelog
 
+### v1.1.0
+Release date: 2025-04-16
+- 16/48-bit support for PNG, TIFF
+- Support ICC-profiles
+- Callback and improved support for RetroShine
+
 ### v1.0.1
 Released date: 2015-04-16
 - github workflow
