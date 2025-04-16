@@ -275,6 +275,3 @@ def test_icc_option(simulate):
         assert result.returncode == 0
         assert output_image_path.exists() != bool(simulate)
         Path(output_image_path).unlink(missing_ok=True)
-    Path(ICC_PROFILE).unlink(missing_ok=True)
-
-
