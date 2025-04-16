@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.1.0'
+__version__ = '1.1.1'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -489,12 +489,13 @@ def make_comment(img, version, cli_params):
     return '\n'.join(comments)
 
 
-def main(callback=None):
+def main(callback=None, loaded_model=None):
     """Pass callback when processing multiple files with a curve model.
 
     callback (callable): call when finishing a file, pass input_path (str), True, info_str
     If error occurs: pass input_path (str), False, error message (str) to proceed or
     return an error message to abort.
+    loaded_model (pt or tf model as returned by inference.get_model)
     """
     parser = get_parser()
     arg = parser.parse_args()
@@ -581,7 +582,9 @@ def main(callback=None):
         # Free-curve correction from predicted curve
         from .inference import get_model, get_ensemble, free_curve_map_image
 
-        if len(arg.model) == 1:
+        if loaded_model is not None:
+            model = loaded_model  # model passed to main
+        elif len(arg.model) == 1:
             model = get_model(arg.model[0])
         else:
             model = get_ensemble(arg.model)
