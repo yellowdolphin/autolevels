@@ -485,7 +485,13 @@ def make_comment(img, version, cli_params):
     return '\n'.join(comments)
 
 
-def main():
+def main(callback=None):
+    """Pass callback when processing multiple files with a curve model.
+
+    callback (callable): call when finishing a file, pass input_path (str), True, info_str
+    If error occurs: pass input_path (str), False, error message (str) to proceed or
+    return an error message to abort.
+    """
     parser = get_parser()
     arg = parser.parse_args()
 
@@ -792,6 +798,10 @@ def main():
             low = 'low ' if (whitepoint < min_white).any() else ''
             infos.append(f'{low}white point: {whitepoint} -> {target_white.round().astype("int")}')
         print(', '.join(infos))
+
+        # Callback
+        if callback is not None:
+            callback(str(fn), True, infos)
 
 
 if __name__ == '__main__':
