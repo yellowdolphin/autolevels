@@ -1,5 +1,9 @@
 # Changelog
 
+### v1.1.1
+Release date: 2025-04-17
+- Support RetroShine fast preview with loaded_model
+
 ### v1.1.0
 Release date: 2025-04-16
 - 16/48-bit support for PNG, TIFF
