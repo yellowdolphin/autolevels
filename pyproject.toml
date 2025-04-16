@@ -14,6 +14,7 @@ dependencies = [
     "numpy",
     "pillow",
     "piexif>=1.1.1,<2.0.0",
+    "h5py",
 ]
 classifiers = [
     "Programming Language :: Python :: 3.9",
