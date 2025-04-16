@@ -588,6 +588,12 @@ def main(callback=None):
 
     # Process input files
     for i, fn in enumerate(fns):
+        # Skip non-existing
+        if not fn.exists():
+            print(f"Error: {fn} not found - skipping")
+            if callback is not None:
+                callback(str(fn), False, f'Error: {fn} not found - skipping')
+            continue
 
         # Decide output file name
         if arg.outfstring:
@@ -607,7 +613,15 @@ def main(callback=None):
             out_fn = (outdir or fn.parent) / f'{stem}{suf}'
         # TODO: check out_fn exists, add option -f to overwrite
 
-        pil_img = Image.open(fn)
+        # Open image if possible
+        try:
+            pil_img = Image.open(fn)
+        except Exception as e:
+            print(f'Error: skipping {fn}, {e}')
+            if callback is not None:
+                callback(str(fn), False, f'Error: broken or unsupported image format (skipping) {fn}')
+            continue
+
         if arg.icc_profile and arg.reset_icc:
             # Convert from sRGB to ICC profile
             try:
