@@ -168,7 +168,8 @@ def extract_arg(filename, parser):
     old_namespace = parser.parse_args()
 
     filename = Path(filename)
-    assert filename.exists(), f'No file {filename}'
+    if not filename.exists():
+        return f'Error: no file {filename}'
 
     img = Image.open(filename)
 
@@ -195,7 +196,8 @@ def extract_arg(filename, parser):
 def merge_args(*, current_arg, extracted_arg):
     """Returns updated `current_arg` Namespace with reproducible parameters from `extracted_arg`."""
     for name in REPRODUCIBLE:
-        assert name in current_arg, f'WARNING: foreign parameter {name}, update reproducible_params!'
+        if name not in current_arg:
+            return f'WARNING: foreign parameter {name}, update reproducible_params!'
         setattr(current_arg, name, getattr(extracted_arg, name))
     current_arg.cli_params = extracted_arg.cli_params
     return current_arg
@@ -311,7 +313,8 @@ def get_blackpoint_whitepoint(array, maxvalue, mode, pixel_black, pixel_white):
         return array.min(axis=(0, 1)), array.max(axis=(0, 1))
 
     elif mode == 'perceptive_serial':
-        assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
+        if img.mode != 'RGB':
+            return f'Error: image mode "{img.mode}" not supported by perceptive sampling mode'
         R, G, B = array.transpose(2, 0, 1)
         L = np.array(img.convert(mode='L'), dtype=np.float32)  # faster than np.mean or python
         L_bp = L.min()
@@ -334,7 +337,8 @@ def get_blackpoint_whitepoint(array, maxvalue, mode, pixel_black, pixel_white):
         return np.array(blackpoint), np.array(whitepoint)
 
     elif mode == 'perceptive':
-        assert img.mode == 'RGB', f'image mode "{img.mode}" not supported by perceptive sampling mode'
+        if img.mode != 'RGB':
+            return f'Error: image mode "{img.mode}" not supported by perceptive sampling mode'
         L = np.array(img.convert(mode='L'), dtype=np.float32)  # faster than np.mean or python
         L_bp = L.min()
         L = (L - L_bp) * (255 / (255 - L_bp)) + 0.5
@@ -516,22 +520,27 @@ def main(callback=None):
     whiteclip = np.array(arg.whiteclip, dtype=float)
     min_white = np.array(arg.minwhite, dtype=int)
     max_whiteshift = np.array(arg.max_whiteshift, dtype=int)
-    assert all(g > 0 for g in arg.gamma), f'invalid gamma {arg.gamma}, must be positive'
+    if not all(g > 0 for g in arg.gamma):
+        return f'Error: invalid gamma {arg.gamma}, must be positive'
     gamma = 1 / np.array(arg.gamma, dtype=float)
     if arg.model:
         for fn in arg.model:
-            assert Path(fn).exists(), f'Specified model file could not be found: {fn}'
+            if not Path(fn).exists():
+                return f'Error: Specified model file could not be found: {fn}'
     if arg.icc_profile:
         icc_file = Path(arg.icc_profile)
-        assert icc_file.exists(), f'File not found: {icc_file}'
+        if not icc_file.exists():
+            return f'Error: file not found: {icc_file}'
         icc_profile = ImageCms.getOpenProfile(str(icc_file))
         sRGB_profile = ImageCms.createProfile('sRGB')
 
     # Input file names
     path = Path(arg.folder)
-    assert path.exists(), f'Folder "{path}" does not exist.'
+    if not path.exists():
+        return f'Error: folder "{path}" does not exist.'
     pre = arg.prefix
-    assert not pre.startswith(('.', '/')), f'Unsecure prefix "{pre}", use --folder to specify the path'
+    if pre.startswith(('.', '/')):
+        return f'Error: unsecure prefix "{pre}", use --folder to specify the path'
     suf = arg.suffix
 
     if arg.fstring:
@@ -555,12 +564,12 @@ def main(callback=None):
                     fns.extend(matches)
                 else:
                     fns.append(path / parent / name)
-            except IndexError:
-                print('path:', path)
-                print('pattern:', x)
-                raise
+            except Exception as e:
+                print(e)
+                return f'No matching files found for {x}'
 
-    assert fns, f'No matching files found in "{path}"'
+    if not fns:
+        return f'No matching files found in "{path}"'
 
     # Output file options
     outdir = Path(arg.outdir) if arg.outdir else Path('.')
@@ -604,8 +613,8 @@ def main(callback=None):
             try:
                 array = np.array(ImageCms.profileToProfile(pil_img, sRGB_profile, icc_profile))
             except ImageCms.PyCMSError as e:
-                raise ValueError(f"{e}. Probably, the ICC profile cannot be used for reverse transformation "
-                      "(missing B2A).")
+                print(e, "ICC probably has no B2A")
+                return "This ICC profile cannot be used for reverse transformation."
         else:
             array = cv2.cvtColor(cv2.imread(fn, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255
