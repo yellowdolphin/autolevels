@@ -1,7 +1,12 @@
 # Changelog
 
+### v1.0.1
+Released date: 2015-04-16
+- github workflow
+- test against PIL 11
+
 ### v1.0.0
-Release date: 2024-11
+Release date: 2024-11-08
 - Simplified CLI options
 - Python f-string options
 - Semantic Versioning
