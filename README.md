@@ -4,7 +4,7 @@ AutoLevels is a program for batch-processing images to fix common issues in a se
 
 ## Purpose
 
-When you encounter images scanned from analog film or poorly processed by automatic corrections, such as "backlight" or simply underexposed, you will find black/white points that are too high/low. Even worse, they can differ by channel and produce a weird glow in dark areas or color cast on the entire image. A typical quick solution is offered by "autolevel" or contrast enhancing features, which set black and white points to zero and 255, respectively. This again might overshoot the problem, and the result may appear unnatural, particularly if the original image has low contrast.
+When you encounter images scanned from analog film or poorly processed by automatic corrections, such as "backlight" or simply underexposed, you will find black/white points that are too high/low. Even worse, they can differ by channel and produce a weird glow in dark areas or color cast on the entire image. Photo editing apps typically have features like "autolevel" or "enhance contrast" that could be used in batch-processing. They set black and white points to zero and 255, respectively. These might overshoot the problem, and the result may appear unnatural, particularly if the original image has low contrast. They are also not very suitable for fixing color problems.
 
 AutoLevels helps you fix these issues by letting you choose sensible black/white points for a batch of images. It detects low-contrast images and treats them differently. Along the way, you can remove a constant color cast, change gamma and saturation. If your color cast or bad camera settings require a more complex curve correction, AutoLevels has you covered: try the AI-based free curve correction, which finds the optimal RGB curves for each image.
 
@@ -14,6 +14,8 @@ AutoLevels helps you fix these issues by letting you choose sensible black/white
 - Smooth/Histogram/Perceptive black/white point sampling
 - Automatically detect low-contrast images and apply sensible corrections
 - Fully automated curve correction
+- Support for 16/48-bit images (PNG, TIFF)
+- Apply ICC color profiles *after* corrections
 - Flexible definition of input/output files (glob pattern, prefix/suffix, Python f-string)
 - Preserves JPEG properties (quality, EXIF)
 - Open source, free software (GPLv3)
@@ -36,6 +38,8 @@ This will also install the following requirements if not found:
 - numpy
 - pillow
 - piexif
+- opencv-python
+- h5py
 
 If you want to use the fully automated curve correction feature, two additional steps are needed:
 1. Install [PyTorch](https://pytorch.org/).
