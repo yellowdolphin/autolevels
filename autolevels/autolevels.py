@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.1.1'
+__version__ = '1.1.2'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -489,16 +489,18 @@ def make_comment(img, version, cli_params):
     return '\n'.join(comments)
 
 
-def main(callback=None, loaded_model=None):
+def main(callback=None, loaded_model=None, argv=None):
     """Pass callback when processing multiple files with a curve model.
 
     callback (callable): call when finishing a file, pass input_path (str), True, info_str
     If error occurs: pass input_path (str), False, error message (str) to proceed or
     return an error message to abort.
     loaded_model (pt or tf model as returned by inference.get_model)
+    argv (list): command line args to use instead of sys.argv[1:]
     """
+    argv = argv or sys.argv[1:]
     parser = get_parser()
-    arg = parser.parse_args()
+    arg = parser.parse_args(argv)
 
     if arg.version:
         print(f'AutoLevels version {__version__}')
