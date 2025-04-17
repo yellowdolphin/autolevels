@@ -1,4 +1,7 @@
 # Changelog
+### v1.1.2
+Release date: 2025-04-17
+- Pass argv to RetroShine
 
 ### v1.1.1
 Release date: 2025-04-17
