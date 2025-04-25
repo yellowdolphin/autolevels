@@ -651,7 +651,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None):
                 except ValueError:
                     try:
                         print(f"image {fn} is not 8-bit, trying 16-bit...")
-                        array = cv2.cvtColor(cv2.imdecode(np.frombuffer(img_stream.read(), np.uint16), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+                        array = cv2.cvtColor(cv2.imdecode(np.frombuffer(io.BytesIO(images[i]).read(), np.uint16), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
                     except ValueError as e:
                         return f"cv2 decoding error: {e}"
             else:
