@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-__version__ = '1.1.2'
+__version__ = '1.1.3'
 
 from pathlib import Path
 from argparse import ArgumentParser
 import sys
 from concurrent.futures import ThreadPoolExecutor
+import io
 
 import numpy as np
 from PIL import Image, ImageFilter, ImageCms
@@ -489,7 +490,7 @@ def make_comment(img, version, cli_params):
     return '\n'.join(comments)
 
 
-def main(callback=None, loaded_model=None, argv=None):
+def main(callback=None, loaded_model=None, argv=None, images=None):
     """Pass callback when processing multiple files with a curve model.
 
     callback (callable): call when finishing a file, pass input_path (str), True, info_str
@@ -497,6 +498,7 @@ def main(callback=None, loaded_model=None, argv=None):
     return an error message to abort.
     loaded_model (pt or tf model as returned by inference.get_model)
     argv (list): command line args to use instead of sys.argv[1:]
+    images (list): images as BytesIO objects
     """
     argv = argv or sys.argv[1:]
     parser = get_parser()
@@ -546,7 +548,13 @@ def main(callback=None, loaded_model=None, argv=None):
         return f'Error: unsecure prefix "{pre}", use --folder to specify the path'
     suf = arg.suffix
 
-    if arg.fstring:
+    if images is not None:
+        if not isinstance(images, list):
+            return f'Error: images must be a list, got {type(images)}'
+        fns = [Path(fn) for fn in arg.files]
+        if len(fns) != len(images):
+            return f'autolevels called with {len(fns)} file names but {len(images)} images passed.'
+    elif arg.fstring:
         fns = [path / evaluate_fstring(arg.fstring, x) for x in arg.files]
         # Check input files exist (fail early)
         for fn in fns:
@@ -594,7 +602,7 @@ def main(callback=None, loaded_model=None, argv=None):
     # Process input files
     for i, fn in enumerate(fns):
         # Skip non-existing
-        if not fn.exists():
+        if (images is None) and not fn.exists():
             print(f"Error: {fn} not found - skipping")
             if callback is not None:
                 callback(str(fn), False, f'Error: {fn} not found - skipping')
@@ -620,7 +628,8 @@ def main(callback=None, loaded_model=None, argv=None):
 
         # Open image if possible
         try:
-            pil_img = Image.open(fn)
+            # This should work with file names, BytesIO, and streamlit.UploadedFile objects
+            pil_img = Image.open(fn if (images is None) else io.BytesIO(images[i]))
         except Exception as e:
             print(f'Error: skipping {fn}, {e}')
             if callback is not None:
@@ -635,7 +644,18 @@ def main(callback=None, loaded_model=None, argv=None):
                 print(e, "ICC probably has no B2A")
                 return "This ICC profile cannot be used for reverse transformation."
         else:
-            array = cv2.cvtColor(cv2.imread(fn, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+            if images is not None:
+                # Unpack streamlit.UploadedFile for cv2 with unknown bit-depth
+                try:
+                    array = cv2.cvtColor(cv2.imdecode(np.frombuffer(io.BytesIO(images[i]).read(), np.uint8), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+                except ValueError:
+                    try:
+                        print(f"image {fn} is not 8-bit, trying 16-bit...")
+                        array = cv2.cvtColor(cv2.imdecode(np.frombuffer(img_stream.read(), np.uint16), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+                    except ValueError as e:
+                        return f"cv2 decoding error: {e}"
+            else:
+                array = cv2.cvtColor(cv2.imread(fn, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255
 
         # Check conditions for 48-bit output
@@ -801,7 +821,7 @@ def main(callback=None, loaded_model=None, argv=None):
             if getattr(arg, 'cli_params', None):
                 cli_params = arg.cli_params
             else:
-                cli_params = purge_cli_params(sys.argv[1:], fn)
+                cli_params = purge_cli_params(argv, fn)
             comment = make_comment(pil_img, __version__, cli_params)
 
             try:
@@ -814,7 +834,7 @@ def main(callback=None, loaded_model=None, argv=None):
 
             # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
             # Hence, this is the only way to fully preserve the entire EXIF:
-            if 'exif' in pil_img.info:
+            if 'exif' in pil_img.info and images is None:
                 piexif.transplant(str(fn), str(out_fn))
 
         # Logging
