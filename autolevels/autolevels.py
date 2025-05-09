@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.1.3'
+__version__ = '1.1.4'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -490,7 +490,7 @@ def make_comment(img, version, cli_params):
     return '\n'.join(comments)
 
 
-def main(callback=None, loaded_model=None, argv=None, images=None):
+def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=False):
     """Pass callback when processing multiple files with a curve model.
 
     callback (callable): call when finishing a file, pass input_path (str), True, info_str
@@ -824,6 +824,9 @@ def main(callback=None, loaded_model=None, argv=None, images=None):
                 cli_params = purge_cli_params(argv, fn)
             comment = make_comment(pil_img, __version__, cli_params)
 
+            if return_bytes:
+                out_fn = io.BytesIO()
+
             try:
                 # Let PIL derive file format from extension
                 img.save(out_fn, comment=comment, optimize=True, **kwargs)
@@ -831,6 +834,10 @@ def main(callback=None, loaded_model=None, argv=None, images=None):
                 # If that fails, save in original format
                 print(f"{e}, saving in {img.format}.")
                 img.save(out_fn, format=img.format, comment=comment, optimize=True, **kwargs)
+
+            if return_bytes:
+                # No EXIF is needed for previews
+                return out_fn.getvalue()
 
             # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
             # Hence, this is the only way to fully preserve the entire EXIF:

@@ -1,4 +1,12 @@
 # Changelog
+### v1.1.4
+Release date: 2025-05-09
+- Return image as BytesIO
+
+### v1.1.3
+Release date: 2025-04-25
+- Pass images as BytesIO
+
 ### v1.1.2
 Release date: 2025-04-17
 - Pass argv to RetroShine
