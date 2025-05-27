@@ -10,6 +10,7 @@ import cv2
 TEST_IMAGE = 'images/lübeck.jpg'
 DEFAULT_OUTPUT_IMAGE_PATH = Path('images/lübeck_al.jpg')
 MODEL = 'models/free_test.pt'
+ONNX_MODEL = 'models/free_test.onnx'
 
 # Create and save an sRGB ICC profile
 ICC_PROFILE = "images/sRGB.ICC"
@@ -249,6 +250,14 @@ def test_reproduce_option(simulate):
 def test_model_option(simulate):
     """Test --model option using free curve inference with MODEL."""
     result = run_autolevels(f'{simulate} --outdir images --model {MODEL} -- {TEST_IMAGE}')
+    assert result.returncode == 0
+    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+
+
+@pytest.mark.parametrize("simulate", ['--simulate', ''])
+def test_onnx(simulate):
+    """Test --model option using onnx instead of torch."""
+    result = run_autolevels(f'{simulate} --outdir images --model {ONNX_MODEL} -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
 

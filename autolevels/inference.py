@@ -85,6 +85,32 @@ def get_model(filename):
         model.input_size = getattr(tf_model, 'input_shape', (None, 384, 384, 3))[1:3]
 
         return model
+    
+    elif Path(filename).suffix == '.onnx':
+        import onnxruntime as ort
+
+        ort_sess = ort.InferenceSession(filename)
+
+        def model(inputs):
+            # channels-first, add batch dim, floatify
+            assert inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}, f'input type {inputs.dtype} not supported'
+            maxvalue = 65535 if inputs.dtype == np.uint16 else 255
+            inputs = inputs.transpose(2, 0, 1)[None, ...].astype(np.float32) / maxvalue
+
+            preds = ort_sess.run(None, {'input': inputs})
+
+            # post-process preds
+            preds = np.clip(preds, 0, 1)
+            preds = monotonize(preds)
+
+            return preds
+
+        model.input_size = (384, 384)
+
+        return model
+    
+    else:
+        print(f"Error: model file suffix {Path(filename).suffix} not recognized")
 
 
 def get_ensemble(filenames):
