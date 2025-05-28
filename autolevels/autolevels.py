@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.1.4'
+__version__ = '1.2.0'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -826,6 +826,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
             if return_bytes:
                 out_fn = io.BytesIO()
+                comment = ''
+                kwargs['format'] = img.format
 
             try:
                 # Let PIL derive file format from extension

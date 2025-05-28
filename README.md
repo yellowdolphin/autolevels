@@ -42,15 +42,16 @@ This will also install the following requirements if not found:
 - h5py
 
 If you want to use the fully automated curve correction feature, two additional steps are needed:
-1. Install [PyTorch](https://pytorch.org/).
-2. Download a [Free Curve Inference model](https://www.kaggle.com/models/greendolphin/freecin) as tar.gz and extract it:
+
+1. Install the onnxruntime
 ```bash
-tar -xzvf freecin-pytorch-xcittiny-v1.tar.gz
+pip install onnxruntime
 ```
+2. Download the [Free Curve Inference model](https://www.retroshine.eu/download/free_xcittiny_wa14.onnx)
 
 Now, you should be good to go:
 ```bash
-autolevels --model {your_downloaded_model_file} -- example.jpg
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx -- example.jpg
 ```
 
 ## Documentation

@@ -1,4 +1,8 @@
 # Changelog
+### v1.2.0
+Release date: 2025-05-28
+- Add support for ONNX models
+
 ### v1.1.4
 Release date: 2025-05-09
 - Return image as BytesIO
