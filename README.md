@@ -54,6 +54,10 @@ Now, you should be good to go:
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx -- example.jpg
 ```
 
+## Graphical User Interface
+
+If you prefer a graphical user interface, you can checkout [RetroShine](https://retroshine.eu), which provides a user-friendly interface for AutoLevels.
+
 ## Documentation
 
 ### Basic Usage

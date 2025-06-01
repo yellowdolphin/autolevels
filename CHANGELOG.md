@@ -1,4 +1,8 @@
 # Changelog
+### v1.2.1
+Release date: 2025-07-05
+- Fix inference with saturation-first
+
 ### v1.2.0
 Release date: 2025-05-28
 - Add support for ONNX models

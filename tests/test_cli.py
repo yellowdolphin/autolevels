@@ -255,6 +255,14 @@ def test_model_option(simulate):
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
+def test_model_option_with_saturation_first(simulate):
+    """Test --model and --saturation-first options."""
+    result = run_autolevels(f'{simulate} --outdir images --model {MODEL} --saturation-first --saturation 0.8 -- {TEST_IMAGE}')
+    assert result.returncode == 0
+    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+
+
+@pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_onnx(simulate):
     """Test --model option using onnx instead of torch."""
     result = run_autolevels(f'{simulate} --outdir images --model {ONNX_MODEL} -- {TEST_IMAGE}')

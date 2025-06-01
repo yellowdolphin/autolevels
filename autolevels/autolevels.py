@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.2.0'
+__version__ = '1.2.1'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -692,8 +692,12 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
         # Adjust saturation before anything else
         if (saturation != 1) and arg.saturation_first:
-            L = grayscale(array)
-            array = blend(array, L, saturation)
+            L = grayscale(array)  # float32
+            array = blend(array, L, saturation)  # float32
+
+            # Convert from float32 to uint16
+            array = (array * (65535 / 255) if maxvalue == 255 else array).round().clip(0, 65535).astype('uint16')
+            maxvalue = 65535
 
         if arg.model:
             # Simulate: just test inference on first image
