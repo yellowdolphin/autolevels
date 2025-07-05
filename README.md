@@ -47,7 +47,7 @@ If you want to use the fully automated curve correction feature, two additional 
 ```bash
 pip install onnxruntime
 ```
-2. Download the [Free Curve Inference model](https://www.retroshine.eu/download/free_xcittiny_wa14.onnx)
+2. Download the [Free Curve Inference model](https://retroshine.eu/download/free_xcittiny_wa14.onnx)
 
 Now, you should be good to go:
 ```bash
