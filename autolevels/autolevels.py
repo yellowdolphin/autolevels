@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.2.1'
+__version__ = '1.2.2'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -847,7 +847,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
             # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
             # Hence, this is the only way to fully preserve the entire EXIF:
-            if 'exif' in pil_img.info and images is None:
+            piexif_supported = {'.jpg', '.jpeg'}
+            if 'exif' in pil_img.info and (out_fn.suffix.lower() in piexif_supported) and images is None:
                 piexif.transplant(str(fn), str(out_fn))
 
         # Logging

@@ -1,9 +1,10 @@
 import subprocess
 import pytest
 from pathlib import Path
-from PIL import ImageCms
+from PIL import Image, ImageCms
 import numpy as np
 import cv2
+import piexif
 
 
 # Define path to the test image
@@ -292,3 +293,35 @@ def test_icc_option(simulate):
         assert result.returncode == 0
         assert output_image_path.exists() != bool(simulate)
         Path(output_image_path).unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("simulate", ['--simulate', ''])
+def test_piexif(simulate):
+    """Test transferring EXIF data between JPEG images."""
+    img = Image.open(TIFF_IMAGE)
+    tag, value = piexif.ExifIFD.FNumber, (56, 10)
+    exif_dict = {"Exif": {tag: value}}
+    exif_bytes = piexif.dump(exif_dict)
+    fn = DEFAULT_OUTPUT_IMAGE_PATH
+    img.save(fn, exif=exif_bytes)
+    output_image_path = Path(fn).parent / (Path(fn).stem + '_al.jpg')
+    Path(output_image_path).unlink(missing_ok=True)
+    result = run_autolevels(f'{simulate} --outdir images --outsuffix _al.jpg -- {fn}')
+    assert result.returncode == 0
+    assert output_image_path.exists() != bool(simulate)
+    if not bool(simulate):
+        # test EXIF has been transferred
+        img = Image.open(output_image_path)
+        exif_dict_out = img._getexif()
+        assert exif_dict is not None, 'no EXIF'
+        assert exif_dict_out[tag] == 5.6, f'wrong EXIF value: {exif_dict_out[tag]}'
+    Path(output_image_path).unlink(missing_ok=True)
+    for fn, outsuffix in ((DEFAULT_OUTPUT_IMAGE_PATH, '_al.tif'), (PNG_IMAGE, '_al.jpg')):
+        # test: no error if EXIF is unsupported
+        output_image_path = Path(fn).parent / (Path(fn).stem + outsuffix)
+        result = run_autolevels(f'{simulate} --outdir images --outsuffix {outsuffix} -- {fn}')
+        assert result.returncode == 0
+        assert output_image_path.exists() != bool(simulate)
+        Path(output_image_path).unlink(missing_ok=True)
+    Path(DEFAULT_OUTPUT_IMAGE_PATH).unlink(missing_ok=True)
+
