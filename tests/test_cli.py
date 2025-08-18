@@ -326,7 +326,6 @@ def test_piexif(simulate):
         assert result.returncode == 0
         assert output_image_path.exists() != bool(simulate)
         Path(output_image_path).unlink(missing_ok=True)
-    DEFAULT_OUTPUT_IMAGE_PATH.unlink(missing_ok=True)
 
 
 # Create and save an AdobeRGB ICC profile
@@ -334,7 +333,6 @@ def test_piexif(simulate):
 def test_darktable_icc(simulate):
     """Test --icc option with darktable export."""
     OUTPUT_XMP_PATH = Path(TEST_IMAGE).with_suffix(Path(TEST_IMAGE).suffix + '.xmp')
-    DEFAULT_OUTPUT_IMAGE_PATH.unlink(missing_ok=True)
     OUTPUT_XMP_PATH.unlink(missing_ok=True)
     result = run_autolevels(f'{simulate} --outdir images --model {MODEL} --icc {ICC_PROFILE} --export darktable -- {TEST_IMAGE}')
     assert result.returncode == 0
@@ -366,7 +364,7 @@ def test_darktable_icc(simulate):
                 entry_data[local_key] = value
 
             history_data.append(entry_data)
-            
+
     assert description.get('{http://darktable.sf.net/}history_basic_hash') == "33e4711b8f6644f5f8c2a164fa3f94cd"
     for li in history_data:
         if li['operation'] == 'colorin':
@@ -378,5 +376,3 @@ def test_darktable_icc(simulate):
             assert li['multi_name_hand_edited'] == '1'
     Path(DEFAULT_OUTPUT_IMAGE_PATH).unlink(missing_ok=True)
     OUTPUT_XMP_PATH.unlink(missing_ok=True)
-
-
