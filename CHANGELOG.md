@@ -1,4 +1,8 @@
 # Changelog
+### v1.2.2
+Release date: 2025-08-18
+- Fix piexif.transfer (skip non-JPEG images)
+
 ### v1.2.1
 Release date: 2025-07-05
 - Fix inference with saturation-first
