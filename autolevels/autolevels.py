@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.2.2'
+__version__ = '1.3.0'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -154,6 +154,13 @@ def get_parser():
                                 'The input image is first converted from sRGB to the profile specified with the '
                                 '--icc-profile option, then all corrections are applied, then the image is converted '
                                 'back to sRGB before saving. This feature disables 48-bit processing.'))
+
+    parser.add_argument(
+        '--export', default='', choices=['darktable'], help=(
+            'Export curves to supported programs. '
+            '"darktable": Append rgb curve to history of an existing darktable XMP file. You can skip image output '
+            'by specifying an OUTSUFFIX or OUTFSTRING ending with ".xmp".'))
+
     parser.add_argument(
         '--version', action='store_true', help='Print version information and exit')
 
@@ -532,6 +539,11 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         for fn in arg.model:
             if not Path(fn).exists():
                 return f'Error: Specified model file could not be found: {fn}'
+    else:
+        if arg.outsuffix and arg.outsuffix.endswith('.xmp'):
+            return 'Error: cannot export to darktable XMP without a model'
+        if arg.export == 'darktable':
+            print('Warning: ignoring option --export darktable, no model specified')
     if arg.icc_profile:
         icc_file = Path(arg.icc_profile)
         if not icc_file.exists():
@@ -647,11 +659,15 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             if images is not None:
                 # Unpack streamlit.UploadedFile for cv2 with unknown bit-depth
                 try:
-                    array = cv2.cvtColor(cv2.imdecode(np.frombuffer(io.BytesIO(images[i]).read(), np.uint8), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+                    array = cv2.cvtColor(cv2.imdecode(
+                        np.frombuffer(io.BytesIO(images[i]).read(), np.uint8), cv2.IMREAD_UNCHANGED
+                        ), cv2.COLOR_BGR2RGB)
                 except ValueError:
                     try:
                         print(f"image {fn} is not 8-bit, trying 16-bit...")
-                        array = cv2.cvtColor(cv2.imdecode(np.frombuffer(io.BytesIO(images[i]).read(), np.uint16), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+                        array = cv2.cvtColor(cv2.imdecode(
+                            np.frombuffer(io.BytesIO(images[i]).read(), np.uint16), cv2.IMREAD_UNCHANGED
+                            ), cv2.COLOR_BGR2RGB)
                     except ValueError as e:
                         return f"cv2 decoding error: {e}"
             else:
@@ -707,6 +723,30 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
             resized = cv2.resize(array, (384, 384)[::-1])  # uint16 or uint8
             free_curve = model(resized)
+
+            # Export curves to supported programs
+            if arg.export == 'darktable' or out_fn.suffix.endswith('.xmp'):
+                from .export import append_rgbcurve_history_item
+
+                # darktable xmp suffixes: .png.xmp (default), _01.png.xmp (via outsuffix, outfstring)
+                if out_fn.suffix.endswith('.xmp'):
+                    xmp_file = out_fn
+                    skip_image_output = True
+                else:
+                    xmp_file = fn.with_suffix(fn.suffix + '.xmp')
+                    skip_image_output = False
+
+                try:
+                    append_rgbcurve_history_item(xmp_file, free_curve, pil_img, arg.icc_profile)
+                except Exception as e:
+                    print(f'Error: failed generating {xmp_file}, skipping darktable export.')
+                    print(e)  # DEBUG
+                    if skip_image_output:
+                        continue
+
+                if skip_image_output:
+                    print(f'{fn} -> {xmp_file}')
+                    continue
 
             array = free_curve_map_image(array, free_curve)  # float32, range (0, 1)
 
