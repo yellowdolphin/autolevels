@@ -856,10 +856,28 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             elif out_format == 'TIFF':
                 # Keep input image compression if available
                 kwargs['compression'] = img.info.get('compression', 'raw')
-            if 'icc_profile' in img.info and out_format in {'JPEG'}:
+            if 'icc_profile' in img.info and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
                 kwargs['icc_profile'] = img.info.get('icc_profile')
             if 'dpi' in img.info and out_format in {'JPEG', 'TIFF', 'PNG'}:
                 kwargs['dpi'] = tuple(round(x) for x in img.info['dpi'])
+            if 'exif' in pil_img.info and out_format in {'WEBP', 'PNG'}:
+                kwargs['exif'] = pil_img.getexif()
+            if 'exif' in pil_img.info and out_format in {'TIFF'} and pil_img.format != 'TIFF':
+                # For TIFF -> TIFF processing, EXIF data is preserved without any kwarg.
+                # For X -> TIFF, kwarg exif works only with a TIFF-style IFD, not img.getexif().
+                from PIL.TiffImagePlugin import ImageFileDirectory_v2
+
+                ifd = ImageFileDirectory_v2()
+                for tag_id, value in pil_img.getexif().items():
+                    try:
+                        ifd[tag_id] = value
+                    except Exception as e:
+                        # print(f"Skipping tag {tag_id}: {e}")
+                        pass
+                if len(ifd) > 0:
+                    kwargs['tiffinfo'] = ifd
+            if 'xmp' in pil_img.info and out_format in {'WEBP'}:
+                kwargs['xmp'] = pil_img.info.get('xmp')
 
             # Make reproducible, leave CLI args in JPEG comment
             if getattr(arg, 'cli_params', None):
