@@ -6,19 +6,20 @@ AutoLevels is a program for batch-processing images to fix common issues in a se
 
 When you encounter images scanned from analog film or poorly processed by automatic corrections, such as "backlight" or simply underexposed, you will find black/white points that are too high/low. Even worse, they can differ by channel and produce a weird glow in dark areas or color cast on the entire image. Photo editing apps typically have features like "autolevel" or "enhance contrast" that could be used in batch-processing. They set black and white points to zero and 255, respectively. These might overshoot the problem, and the result may appear unnatural, particularly if the original image has low contrast. They are also not very suitable for fixing color problems.
 
-AutoLevels helps you fix these issues by letting you choose sensible black/white points for a batch of images. It detects low-contrast images and treats them differently. Along the way, you can remove a constant color cast, change gamma and saturation. If your color cast or bad camera settings require a more complex curve correction, AutoLevels has you covered: try the AI-based free curve correction, which finds the optimal RGB curves for each image.
+AutoLevels helps you fix these issues by letting you choose sensible target black/white points for a batch of images. It detects low-contrast images and treats them differently. Along the way, you can remove a constant color cast, change gamma and saturation. If your color cast or bad camera settings require a more complex curve correction, AutoLevels has you covered: try the AI-based free curve correction, which finds the optimal RGB curves for each image.
 
 ## Features
 
 - Adjust black point, white point, gamma, and saturation
+- Fully automated curve-based color correction feature
 - Smooth/Histogram/Perceptive black/white point sampling
 - Automatically detect low-contrast images and apply sensible corrections
-- Fully automated curve correction
-- Support for 16/48-bit images (PNG, TIFF)
+- Export darktable XMP files for a professional non-destructive workflow
+- Support for 16/48-bit images (TIFF, PNG)
 - Apply ICC color profiles *after* corrections
 - Flexible definition of input/output files (glob pattern, prefix/suffix, Python f-string)
-- Preserves JPEG properties (quality, EXIF)
-- Open source, free software (GPLv3)
+- Preserves compression quality and metadata (EXIF, ICC-profile)
+- Free Open Source Software (GPLv3)
 
 ## Installation
 
@@ -66,7 +67,9 @@ If you prefer a graphical user interface, you can checkout [RetroShine](https://
 autolevels --blackpoint 10 --whitepoint 255 --gamma 1.1 -- example.jpg
 ```
 
-This will process the file `example.jpg` and write the output to `example_al.jpg` using the default suffix "`_al`". You can change that with `--outsuffix <my suffix>` or specify an output folder with `--outdir`. See **Batch Processing** for more ways to define input and output file names.
+This will process the file `example.jpg` and write the output to `example_al.jpg` using the default suffix "`_al`". You can change that with `--outsuffix <my suffix>` or specify an output folder with `--outdir`. See **Batch Processing** for more ways to define input and output file names. 
+
+You can either use the fully automated correction with the `--model` option **or** manually specify target values for the black and white points of your images with the `--blackpoint` and `--whitepoint` options. In the latter case, you can further adjust the scope of the correction by setting bounds for images with low contrast. 
 
 Get a description of all options with:
 
@@ -81,7 +84,7 @@ autolevels --simulate --blackpoint 10 5 0 --mode perceptive -- *.jpg
 
 ### Batch Processing
 
-The power of batch processing lets you apply the same corrections to a batch of images with a common capture source, camera settings, lighting conditions, or any common issue that can be fixed in a semi-automated fashion. If you don't have the time or expertise to find the optimal parameters, you can leverage AI power using the `--model` option. This will correct each image with an individual RGB curve, fully automatic, correcting color casts, bad exposure, or white balance settings on the fly.
+The power of batch processing lets you apply the same corrections to a batch of images with a common capture source, camera settings, lighting conditions, or any common issue that can be fixed in a semi-automated fashion. If you don't have the time or expertise to find the optimal parameters, you can leverage AI power using the `--model` option. This will correct each image with individual RGB curves, fully automatic, correcting color casts, bad exposure, or white balance settings on the fly.
 
 This leaves you with defining input and output files and paths. AutoLevels gives you three ways to do that.
 
@@ -116,3 +119,21 @@ If you provide an f-string to the `--fstring` or `--outfstring` options (you can
 autolevels --fstring "orig/scn{i}.jpg" --outfstring "processed/img_{i:04d}.jpg" -- 1 2 3
 ```
 This will read files `orig/scn1.jpg ...` and write `processed/img_0001.jpg ...` to disk.
+
+### Exporting darktable XMP files
+
+You can use AutoLevels as an automatic preprocessing step in a non-destructive workflow using [darktable](https://www.darktable.org). The idea is to establish a baseline color correction with the `--model` option and export the curves to darktable, where you can fine-tune them or proceed with your normal darktable workflow.
+
+```
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export darktable -- *.jpg
+```
+
+By setting the `--export darktable` option, AutoLevels will create a darktable XMP file for each image. This XMP file already contains the default auto-apply presets and adds an "*rgb curve*" instance labelled "AutoLevels" to the history stack.
+
+You can also generate the XMP files with darktable first (for instance if you have custom auto-apply presets) and provide AutoLevels with the suffix for the XMP files:
+
+```
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --outsuffix ".jpg.xmp" -- *.jpg
+```
+
+If provided `outsuffix` ends with ".xmp", AutoLevels will skip image output and just create or modify the matching XMP files. Note that darktable only reads XMP files on import, unless you activate the option `look for updated XMP files on startup` in preferences/storage.

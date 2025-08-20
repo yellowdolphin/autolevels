@@ -1,4 +1,9 @@
 # Changelog
+### v1.3.0
+Release date: 2025-08-20
+- New export feature for darktable XMP files
+- Preserve EXIF and embedded ICC profiles in TIFF, PNG, WebP
+
 ### v1.2.2
 Release date: 2025-08-18
 - Fix piexif.transfer (skip non-JPEG images)
