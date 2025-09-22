@@ -14,6 +14,88 @@ import io
 from PIL import ImageCms
 
 
+# iop_order_list is only constructed from scratch if it is missing in XMP file or no XMP file exists.
+# Note, that it is actually missing if the user did not change it manually.
+# Only non-RAW files are supported.
+iop_order_list = {}
+# first supported version
+iop_order_list['4.8'] = (
+    'rawprepare,0,invert,0,temperature,0,'
+    'highlights,0,cacorrect,0,hotpixels,0,rawdenoise,0,demosaic,0,rgbcurve,1,colorin,0,'
+    'denoiseprofile,0,bilateral,0,rotatepixels,0,scalepixels,0,lens,0,cacorrectrgb,0,'
+    'hazeremoval,0,ashift,0,flip,0,enlargecanvas,0,overlay,0,clipping,0,liquify,0,'
+    'spots,0,retouch,0,exposure,0,mask_manager,0,tonemap,0,toneequal,0,crop,0,'
+    'graduatednd,0,profile_gamma,0,equalizer,0,channelmixerrgb,0,diffuse,0,censorize,0'
+    ',negadoctor,0,blurs,0,primaries,0,nlmeans,0,colorchecker,0,defringe,0,atrous,0,'
+    'lowpass,0,highpass,0,sharpen,0,colortransfer,0,colormapping,0,channelmixer,0,'
+    'basicadj,0,colorbalance,0,colorequal,0,colorbalancergb,0,rgbcurve,0,rgblevels,0,'
+    'basecurve,0,filmic,0,sigmoid,0,filmicrgb,0,lut3d,0,colisa,0,tonecurve,0,levels,0,'
+    'shadhi,0,zonesystem,0,globaltonemap,0,relight,0,bilat,0,colorcorrection,0,'
+    'colorcontrast,0,velvia,0,vibrance,0,colorzones,0,bloom,0,colorize,0,lowlight,0,'
+    'monochrome,0,grain,0,soften,0,splittoning,0,vignette,0,colorreconstruct,0,'
+    'colorout,0,clahe,0,finalscale,0,overexposed,0,rawoverexposed,0,dither,0,borders,0,'
+    'watermark,0,gamma,0')
+# moved in 5.0: finalscale
+iop_order_list['5.0'] = (
+    'rawprepare,0,invert,0,temperature,0,'
+    'highlights,0,cacorrect,0,hotpixels,0,rawdenoise,0,demosaic,0,rgbcurve,1,colorin,0,'
+    'denoiseprofile,0,bilateral,0,rotatepixels,0,scalepixels,0,lens,0,cacorrectrgb,0,'
+    'hazeremoval,0,ashift,0,flip,0,enlargecanvas,0,overlay,0,clipping,0,liquify,0,'
+    'spots,0,retouch,0,exposure,0,mask_manager,0,tonemap,0,toneequal,0,crop,0,'
+    'graduatednd,0,profile_gamma,0,equalizer,0,channelmixerrgb,0,diffuse,0,censorize,0'
+    ',negadoctor,0,blurs,0,primaries,0,nlmeans,0,colorchecker,0,defringe,0,atrous,0,'
+    'lowpass,0,highpass,0,sharpen,0,colortransfer,0,colormapping,0,channelmixer,0,'
+    'basicadj,0,colorbalance,0,colorequal,0,colorbalancergb,0,rgbcurve,0,rgblevels,0,'
+    'basecurve,0,filmic,0,sigmoid,0,filmicrgb,0,lut3d,0,colisa,0,tonecurve,0,levels,0,'
+    'shadhi,0,zonesystem,0,globaltonemap,0,relight,0,bilat,0,colorcorrection,0,'
+    'colorcontrast,0,velvia,0,vibrance,0,colorzones,0,bloom,0,colorize,0,lowlight,0,'
+    'monochrome,0,grain,0,soften,0,splittoning,0,vignette,0,colorreconstruct,0,'
+    'finalscale,0,colorout,0,clahe,0,overexposed,0,rawoverexposed,0,dither,0,borders,0,'
+    'watermark,0,gamma,0')
+# new in 5.2: rasterfile
+iop_order_list['5.2'] = (
+    'rawprepare,0,invert,0,temperature,0,rasterfile,0,'
+    'highlights,0,cacorrect,0,hotpixels,0,rawdenoise,0,demosaic,0,rgbcurve,1,colorin,0,'
+    'denoiseprofile,0,bilateral,0,rotatepixels,0,scalepixels,0,lens,0,cacorrectrgb,0,'
+    'hazeremoval,0,ashift,0,flip,0,enlargecanvas,0,overlay,0,clipping,0,liquify,0,'
+    'spots,0,retouch,0,exposure,0,mask_manager,0,tonemap,0,toneequal,0,crop,0,'
+    'graduatednd,0,profile_gamma,0,equalizer,0,channelmixerrgb,0,diffuse,0,censorize,0'
+    ',negadoctor,0,blurs,0,primaries,0,nlmeans,0,colorchecker,0,defringe,0,atrous,0,'
+    'lowpass,0,highpass,0,sharpen,0,colortransfer,0,colormapping,0,channelmixer,0,'
+    'basicadj,0,colorbalance,0,colorequal,0,colorbalancergb,0,rgbcurve,0,rgblevels,0,'
+    'basecurve,0,filmic,0,sigmoid,0,filmicrgb,0,lut3d,0,colisa,0,tonecurve,0,levels,0,'
+    'shadhi,0,zonesystem,0,globaltonemap,0,relight,0,bilat,0,colorcorrection,0,'
+    'colorcontrast,0,velvia,0,vibrance,0,colorzones,0,bloom,0,colorize,0,lowlight,0,'
+    'monochrome,0,grain,0,soften,0,splittoning,0,vignette,0,colorreconstruct,0,'
+    'finalscale,0,colorout,0,clahe,0,overexposed,0,rawoverexposed,0,dither,0,borders,0,'
+    'watermark,0,gamma,0')
+
+
+def get_iop_order_list_version(export_version):
+    """Get the iop_order_list version for the given darktable version (export_version)."""
+    latest_version = '5.2'
+    assert latest_version in iop_order_list, f'ERROR: invalid latest_version {latest_version}'
+    if export_version is None:
+        print('Warning: no darktable version specified, using latest iop_order_list')
+        # No issues found with alien modules in the list, darktable simply ignores them.
+        return latest_version
+
+    major_version, minor_version, *patch_version = export_version.split('.')
+    try:
+        major_version = int(major_version)
+        minor_version = int(minor_version)
+    except ValueError:
+        raise ValueError(f'Invalid darktable version {export_version}, must be in the format "major.minor.patch"')
+
+    # Update if iop_order_list changes in new darktable versions
+    if major_version < 5:
+        return '4.8'
+    if major_version == 5 and minor_version < 2:
+        return '5.0'
+
+    return latest_version
+
+
 def compute_monotone_hermite_slopes(x, y):
     """Compute monotone-preserving slopes (derivatives) for PCHIP-like Hermite spline."""
     n = len(x)
@@ -353,7 +435,24 @@ def create_basic_xmp(xmp_file, pil_img):
     return
 
 
-def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None):
+def check_darktable_version(export_version):
+    """Check if the darktable version is supported."""
+    if export_version is None:
+        return
+    try:
+        major_version, minor_version, *patch_version = export_version.split('.')
+        major_version = int(major_version)
+        minor_version = int(minor_version)
+    except ValueError:
+        raise ValueError(f'Invalid darktable version {export_version}, must be in the format "major.minor.patch"')
+    if major_version > 4:
+        return
+    if major_version == 4 and minor_version > 7:
+        return
+    raise ValueError(f'darktable version {export_version} not supported, must be 4.8.1 or greater')
+
+
+def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None, export_version=None):
     """
     Append a new RGB curve history item to the XMP file.
 
@@ -361,6 +460,7 @@ def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_fi
         xmp_file: Path to the XMP file.
         curves: ndarray shape (3, 256) float32 in [0,1]
     """
+    check_darktable_version(export_version)
     new_xmp_file = xmp_file if new_xmp_file is None else new_xmp_file
     if curves.shape[-1] == 768:
         curves = curves.reshape(3, 256)
@@ -456,21 +556,8 @@ def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_fi
                 xmp_lines.append('   darktable:iop_order_version="0"\n')
                 # Add iop_order_list with new "rgbcurve,1" instance before colorin
                 if 'iop_order_list' in missing:
-                    xmp_lines.append('   darktable:iop_order_list="rawprepare,0,invert,0,temperature,0,rasterfile,0,'
-                                     'highlights,0,cacorrect,0,hotpixels,0,rawdenoise,0,demosaic,0,rgbcurve,1,colorin,0,'
-                                     'denoiseprofile,0,bilateral,0,rotatepixels,0,scalepixels,0,lens,0,cacorrectrgb,0,'
-                                     'hazeremoval,0,ashift,0,flip,0,enlargecanvas,0,overlay,0,clipping,0,liquify,0,'
-                                     'spots,0,retouch,0,exposure,0,mask_manager,0,tonemap,0,toneequal,0,crop,0,'
-                                     'graduatednd,0,profile_gamma,0,equalizer,0,channelmixerrgb,0,diffuse,0,censorize,0'
-                                     ',negadoctor,0,blurs,0,primaries,0,nlmeans,0,colorchecker,0,defringe,0,atrous,0,'
-                                     'lowpass,0,highpass,0,sharpen,0,colortransfer,0,colormapping,0,channelmixer,0,'
-                                     'basicadj,0,colorbalance,0,colorequal,0,colorbalancergb,0,rgbcurve,0,rgblevels,0,'
-                                     'basecurve,0,filmic,0,sigmoid,0,filmicrgb,0,lut3d,0,colisa,0,tonecurve,0,levels,0,'
-                                     'shadhi,0,zonesystem,0,globaltonemap,0,relight,0,bilat,0,colorcorrection,0,'
-                                     'colorcontrast,0,velvia,0,vibrance,0,colorzones,0,bloom,0,colorize,0,lowlight,0,'
-                                     'monochrome,0,grain,0,soften,0,splittoning,0,vignette,0,colorreconstruct,0,'
-                                     'finalscale,0,colorout,0,clahe,0,overexposed,0,rawoverexposed,0,dither,0,borders,0,'
-                                     'watermark,0,gamma,0"\n')
+                    iop_order_list_version = get_iop_order_list_version(export_version)
+                    xmp_lines.append(f'   darktable:iop_order_list="{iop_order_list[iop_order_list_version]}"\n')
 
                 # Add missing tags after iop_order_list
                 if 'history_basic_hash' in missing:
@@ -593,6 +680,9 @@ def unix_to_year1_microseconds(unix_timestamp=None):
     """
     if unix_timestamp is None:
         unix_timestamp = time.time()
+        now = True # DEBUG
+    else:
+        now = False # DEBUG
 
     # Calculate microseconds from Year 1 CE to Unix epoch (1970-01-01)
     dt_unix_epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -606,6 +696,22 @@ def unix_to_year1_microseconds(unix_timestamp=None):
 
     # Add Unix microseconds to get total microseconds since Year 1 CE
     year1_microseconds = year1_to_unix_microseconds + int(unix_timestamp * 1_000_000)
+
+    # DEBUG (remove when dt issue is fixed and tested)
+    if False and now:
+        dt = datetime.fromtimestamp((year1_microseconds - 62135596800000000) / 1e+6)
+        print(f'DEBUG current timestamp at {dt.strftime("%Y-%m-%d %H:%M:%S")} is {year1_microseconds}')
+        # database has change_timestamp 63892452067899160, 2025-09-03 01:21:07 from image.change_timestamp
+        # autolevels calculated         63892452067817010  for the same second (82150 µs earlier) -> XMP
+        # But this is not the difference, "updated sidecar file found" complaints about!
+        # 63892486336110989 - 63892486336041116 = 69873 (70 ms) around 10:52:16
+        # but "database timestamp" is reported 10:52:04
+        # when I keep the "database edit", change_timestamp is still the same as XMP file
+        # database has also "write_timestamp", which is 1756889524 before and 1756889978 after keeping the "database edit".
+        # discard history: deletes change_timestamp in XMP and database and updates write_timestamp -> 1756890775 (11:12:55)
+        # read_xmp at 11:27:54: updates change_timestamp 70 ms after XMP -> 63892488474690836 (but not write_timestamp)
+        # "updated XMP sidecar files found" compares write_timestamp aka "database timestamp" (11:12:55) with change_timestamp or actual mtime?
+        # "keep XMP edit" updates write_timestamp in the database with the correct file modification time and change_timestamp to "now"
 
     return year1_microseconds
 

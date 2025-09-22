@@ -156,7 +156,7 @@ def get_parser():
                                 'back to sRGB before saving. This feature disables 48-bit processing.'))
 
     parser.add_argument(
-        '--export', default='', choices=['darktable'], help=(
+        '--export', nargs='+', action='store', default=None, help=(
             'Export curves to supported programs. '
             '"darktable": Append rgb curve to history of an existing darktable XMP file. You can skip image output '
             'by specifying an OUTSUFFIX or OUTFSTRING ending with ".xmp".'))
@@ -535,6 +535,13 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
     if not all(g > 0 for g in arg.gamma):
         return f'Error: invalid gamma {arg.gamma}, must be positive'
     gamma = 1 / np.array(arg.gamma, dtype=float)
+    export_version = None
+    if arg.export:
+        supported_exports = {'darktable',}
+        export_version = arg.export[1] if len(arg.export) > 1 else None
+        arg.export = arg.export[0]
+        if arg.export not in supported_exports:
+            return f'Error: invalid export {arg.export}, must be one of {supported_exports}'
     if arg.model:
         for fn in arg.model:
             if not Path(fn).exists():
@@ -737,7 +744,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     skip_image_output = False
 
                 try:
-                    append_rgbcurve_history_item(xmp_file, free_curve, pil_img, arg.icc_profile)
+                    append_rgbcurve_history_item(xmp_file, free_curve, pil_img, icc=arg.icc_profile, export_version=export_version)
                 except Exception as e:
                     print(f'Error: failed generating {xmp_file}, skipping darktable export.')
                     print(e)  # DEBUG

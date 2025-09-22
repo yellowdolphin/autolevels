@@ -1,4 +1,5 @@
 import subprocess
+from autolevels.export import iop_order_list
 import pytest
 from pathlib import Path
 from PIL import Image, ImageCms
@@ -328,7 +329,6 @@ def test_piexif(simulate):
         Path(output_image_path).unlink(missing_ok=True)
 
 
-# Create and save an AdobeRGB ICC profile
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_darktable_icc(simulate):
     """Test --icc option with darktable export."""
@@ -376,3 +376,57 @@ def test_darktable_icc(simulate):
             assert li['multi_name_hand_edited'] == '1'
     Path(DEFAULT_OUTPUT_IMAGE_PATH).unlink(missing_ok=True)
     OUTPUT_XMP_PATH.unlink(missing_ok=True)
+
+
+def test_darktable_without_export_arg():
+    """Test --outsuffix .xmp without --export"""
+    outsuffix = Path(TEST_IMAGE).suffix + '.xmp'
+    OUTPUT_XMP_PATH = Path(TEST_IMAGE).parent / (Path(TEST_IMAGE).stem + outsuffix)
+    OUTPUT_XMP_PATH.unlink(missing_ok=True)
+
+    result = run_autolevels(f'--outdir images --model {MODEL} --outsuffix {outsuffix} -- {TEST_IMAGE}')
+    assert result.returncode == 0
+    print(result.stdout)
+    assert OUTPUT_XMP_PATH.exists()
+    OUTPUT_XMP_PATH.unlink(missing_ok=True)
+
+
+def test_darktable_versions():
+    """Test darktable export for various supported versions of darktable."""
+    import xml.etree.ElementTree as ET
+
+    for dt_version in ["invalid", "4.8.1", "5.3.0+271~g2a9ae37bcc", "6.0.0"]:
+        outsuffix = '_01' + Path(TEST_IMAGE).suffix + '.xmp'
+        OUTPUT_XMP_PATH = Path(TEST_IMAGE).parent / (Path(TEST_IMAGE).stem + outsuffix)
+        OUTPUT_XMP_PATH.unlink(missing_ok=True)
+
+        cmd = f'--outdir images --model {MODEL} --export darktable {dt_version} --outsuffix {outsuffix} -- {TEST_IMAGE}'
+        print(cmd)
+        result = run_autolevels(cmd)
+        assert result.returncode == 0
+        print(result.stdout)
+        assert 'no darktable version specified' not in result.stdout
+        assert not DEFAULT_OUTPUT_IMAGE_PATH.exists(), 'output image produced despite option --outsuffix'
+        assert OUTPUT_XMP_PATH.exists() is False if (dt_version == 'invalid') else True
+
+        # Verify content of final XMP
+        if not OUTPUT_XMP_PATH.exists(): continue
+        namespaces = {
+            'rdf': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
+            'darktable': 'http://darktable.sf.net/',
+            'xmpMM': 'http://ns.adobe.com/xap/1.0/mm/',
+        }
+
+        tree = ET.parse(OUTPUT_XMP_PATH)
+        root = tree.getroot()
+
+        description = root.find('.//rdf:Description', namespaces)
+        assert description is not None
+
+        iop_order_list = description.get('{http://darktable.sf.net/}iop_order_list')
+        assert iop_order_list is not None
+        print(iop_order_list)
+        assert ('rasterfile' in iop_order_list) is False if (dt_version == '4.8.1') else True
+
+        OUTPUT_XMP_PATH.unlink(missing_ok=True)
+    Path(DEFAULT_OUTPUT_IMAGE_PATH).unlink(missing_ok=True)

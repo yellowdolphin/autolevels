@@ -2,7 +2,7 @@ from multiprocessing.context import get_spawning_popen
 import pytest
 from autolevels import make_comment
 from autolevels.export import (fit_rgb_curves, compute_monotone_hermite_slopes, hermite_eval, create_basic_xmp, 
-                               check_missing, append_rgbcurve_history_item, local_name)
+                               check_missing, append_rgbcurve_history_item, local_name, check_darktable_version)
 from PIL import Image
 import numpy as np
 from pathlib import Path
@@ -134,6 +134,14 @@ def test_create_basic_xmp_writes_file():
     assert description.get('{http://darktable.sf.net/}history_current_hash') == '6cbed05a9150be22123901a023a7ca8c'  # hash from darktable
 
     xmp_file.unlink()  # Clean up after test
+
+
+def test_check_darktable_version():
+    with pytest.raises(ValueError):
+        check_darktable_version('invalid')
+    with pytest.raises(ValueError):
+        check_darktable_version('4.7.9')
+    assert check_darktable_version('6.0') is None
 
 
 def test_append_rgbcurve_history_item():
