@@ -7,6 +7,7 @@ from PIL import Image
 import numpy as np
 from pathlib import Path
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 
 
 RANDOM_VERSION = "3.14.15"
@@ -105,7 +106,8 @@ def test_create_basic_xmp_writes_file():
     root = tree.getroot()
     description = root.find('.//rdf:Description', namespaces)
 
-    assert description.get('{http://ns.adobe.com/exif/1.0/}DateTimeOriginal') == '2023:01:06 23:11:00.408'  # mtime (UTC)
+    mtime = datetime.fromtimestamp(Path("images/lübeck.jpg").stat().st_mtime, tz=timezone.utc).strftime("%Y:%m:%d %H:%M:%S.%f")[:-3]
+    assert description.get('{http://ns.adobe.com/exif/1.0/}DateTimeOriginal') == mtime
     assert description.get('{http://ns.adobe.com/xap/1.0/mm/}DerivedFrom') == Path(pil_img.filename).name
     assert description.get('{http://darktable.sf.net/}import_timestamp') != '-1'
 
