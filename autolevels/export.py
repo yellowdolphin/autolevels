@@ -452,6 +452,20 @@ def check_darktable_version(export_version):
     raise ValueError(f'darktable version {export_version} not supported, must be 4.8.1 or greater')
 
 
+def darktable_change_timestamp_fixed(darktable_version):
+    """Return True if apply_sidecar updates change_timestamp (not before darktable 5.4).
+    
+    See issue #18253: https://github.com/darktable-org/darktable/issues/18253
+    """
+    try:
+        major_version, minor_version, *patch = darktable_version.split('.')
+        assert int(major_version) >= 5
+        assert int(major_version) > 5 or int(minor_version) > 3
+    except (AttributeError, ValueError, AssertionError):
+        return False
+    return True
+
+
 def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None, export_version=None):
     """
     Append a new RGB curve history item to the XMP file.
@@ -525,6 +539,10 @@ def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_fi
         'blendop_params': "gz08eJxjYGBgYAFiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dlAx68oBEMbFxwX+AwGIBgCbGCeh",
     }
 
+    if not darktable_change_timestamp_fixed(export_version):
+        # Don't add change_timestamp until issues are fixed.
+        missing.discard('change_timestamp')
+
     xmp_lines = []
     in_history = False
     in_colorin = False
@@ -537,7 +555,10 @@ def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_fi
                 continue
 
             elif line.strip().startswith('darktable:change_timestamp='):
-                xmp_lines.append(f'   darktable:change_timestamp="{now_stamp}"\n')
+                if darktable_change_timestamp_fixed(export_version):
+                    xmp_lines.append(f'   darktable:change_timestamp="{now_stamp}"\n')
+                else:
+                    xmp_lines.append(line)
                 continue
 
             elif line.strip().startswith('darktable:version_name='):
