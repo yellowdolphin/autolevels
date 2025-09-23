@@ -36,21 +36,17 @@ pip install git+https://github.com/yellowdolphin/autolevels.git
 ```
 
 This will also install the following requirements if not found:
+
 - numpy
 - pillow
 - piexif
 - opencv-python
 - h5py
+- onnxruntime
 
-If you want to use the fully automated curve correction feature, two additional steps are needed:
+To use the fully automated curve correction feature, download the [ONNX curve inference model](https://retroshine.eu/download/free_xcittiny_wa14.onnx)
+and specify the downloaded .onnx file using the `--model` option:
 
-1. Install the onnxruntime
-```bash
-pip install onnxruntime
-```
-2. Download the [Free Curve Inference model](https://retroshine.eu/download/free_xcittiny_wa14.onnx)
-
-Now, you should be good to go:
 ```bash
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx -- example.jpg
 ```
@@ -78,6 +74,7 @@ autolevels -h
 ```
 
 Safely try out settings before writing any output files with `--simulate` or `--sandbox`. You can check file names, black/white point correction, as images are read and processed, but not saved.
+
 ```bash
 autolevels --simulate --blackpoint 10 5 0 --mode perceptive -- *.jpg
 ```
@@ -89,51 +86,60 @@ The power of batch processing lets you apply the same corrections to a batch of 
 This leaves you with defining input and output files and paths. AutoLevels gives you three ways to do that.
 
 1. **Folders and glob patterns**
-```bash
-autolevels --outdir processed -- scans/*.png IMG_00[0-3]?.jpg
-```
-Your shell will interpret these glob patterns and expand the file names to `scans/12.png scans/23.png IMG_0015.jpg ...` matching any existing files in the current directory. All output files are written to the specified folder `processed`.
 
-If you are afraid the expanded list of file paths exceeds the shell limit for the length of a command, you can specify a folder for the input files and enter the glob pattern in quotes to escape shell expansion:
-```bash
-autolevels --folder ~/Pictures/scans -- "*.tif"
-```
+   ```bash
+   autolevels --outdir processed -- scans/*.png IMG_00[0-3]?.jpg
+   ```
+
+   Your shell will interpret these glob patterns and expand the file names to `scans/12.png scans/23.png IMG_0015.jpg ...` matching any existing files in the current directory. All output files are written to the specified folder `processed`.
+
+   If you are afraid the expanded list of file paths exceeds the shell limit for the length of a command, you can specify a folder for the input files and enter the glob pattern in quotes to escape shell expansion:
+
+   ```bash
+   autolevels --folder ~/Pictures/scans -- "*.tif"
+   ```
 
 2. **Prefixes and Suffixes**
-Often, your input file names will have a common folder, prefix, suffix, and some variable part in between. You may want to keep the variable part and change any of the fixed components, for example:
-```bash
-autolevels --folder orig --prefix scn --suffix .jpg --outfolder processed --outprefix img_ --outsuffix .jpg -- 1 2 3 4
-```
-This will search for input files `orig/scn1.jpg ...` and write output files `processed/img_1.jpg ...`
+   Often, your input file names will have a common folder, prefix, suffix, and some variable part in between. You may want to keep the variable part and change any of the fixed components, for example:
+
+   ```bash
+   autolevels --folder orig --prefix scn --suffix .jpg --outfolder processed --outprefix img_ --outsuffix .jpg -- 1 2 3 4
+   ```
+
+   This will search for input files `orig/scn1.jpg ...` and write output files `processed/img_1.jpg ...`
 
 3. **Python f-strings**
-An alternative way to define file names in AutoLevels is to use Python f-strings. Don't worry, no Python skills required, just look at this example:
-```python
-variable = 42
-f"orig/scn_{variable:04d}.jpg"
-```
-This is proper Python code and evaluates to "orig/scn_0042.jpg". The part in curly brackets contains a variable name and (after the `:`) an optional format instruction for integer numbers `d`, which shall have leading `0`s to make `4` digits.
+   An alternative way to define file names in AutoLevels is to use Python f-strings. Don't worry, no Python skills required, just look at this example:
 
-If you provide an f-string to the `--fstring` or `--outfstring` options (you can skip the "f" before the quotes), AutoLevels substitutes `variable` by any values given instead of file names:
-```bash
-autolevels --fstring "orig/scn{i}.jpg" --outfstring "processed/img_{i:04d}.jpg" -- 1 2 3
-```
-This will read files `orig/scn1.jpg ...` and write `processed/img_0001.jpg ...` to disk.
+   ```python
+   variable = 42
+   f"orig/scn_{variable:04d}.jpg"
+   ```
+
+   This is proper Python code and evaluates to "orig/scn_0042.jpg". The part in curly brackets contains a variable name and (after the `:`) an optional format instruction for integer numbers `d`, which shall have leading `0`s to make `4` digits.
+
+   If you provide an f-string to the `--fstring` or `--outfstring` options (you can skip the "f" before the quotes), AutoLevels substitutes `variable` by any values given instead of file names:
+
+   ```bash
+   autolevels --fstring "orig/scn{i}.jpg" --outfstring "processed/img_{i:04d}.jpg" -- 1 2 3
+   ```
+
+   This will read files `orig/scn1.jpg ...` and write `processed/img_0001.jpg ...` to disk.
 
 ### Exporting darktable XMP files
 
 You can use AutoLevels as an automatic preprocessing step in a non-destructive workflow using [darktable](https://www.darktable.org). The idea is to establish a baseline color correction with the `--model` option and export the curves to darktable, where you can fine-tune them or proceed with your normal darktable workflow.
 
-```
-autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export darktable -- *.jpg
-```
+The recommended way to use AutoLevels curves in darktable is to install the [darktable-autolevels-module](https://github.com/yellowdolphin/darktable-autolevels-module) Lua script, which you can activate via the _scripts_ module in the lighttable view. An _AutoLevels_ module will appear in the same panel. Click the little file browser button to search for the downloaded .onnx file. Then select images and press the "add AutoLevels curve" button. Changing to the darkroom, you will find a new history item that adds an _rgb curve_ instance in mode "RGB, independent channels". Feel free to make adjustments to the curves, the original curves will remain in the history.
 
-By setting the `--export darktable` option, AutoLevels will create a darktable XMP file for each image. This XMP file already contains the default auto-apply presets and adds an "*rgb curve*" instance labelled "AutoLevels" to the history stack.
+You might notice that the _rgb curve_ instance created by AutoLevels is applied right before the _input color profile_ module. This is where the channel-wise color correction works most effectively for JPEGs and most HDR images (RAW formats are not yet supported by the script). If you create a new _rgb curve_ instance, this will appear at the usual place in the pipeline.
 
-You can also generate the XMP files with darktable first (for instance if you have custom auto-apply presets) and provide AutoLevels with the suffix for the XMP files:
+Under the hood, the Lua script calls `autolevels` with the `--export darktable <version>` argument:
 
-```
-autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --outsuffix ".jpg.xmp" -- *.jpg
+```bash
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export darktable 5.3.0 --outsuffix .jpg.xmp -- myimage.jpg
 ```
 
-If provided `outsuffix` ends with ".xmp", AutoLevels will skip image output and just create or modify the matching XMP files. Note that darktable only reads XMP files on import, unless you activate the option `look for updated XMP files on startup` in preferences/storage.
+AutoLevels reads the XMP sidecar file associated with each selected image (or duplicate). It is passed via the `--outsuffix` option. If the XMP file does not exist, AutoLevels will create a minimal one with the default auto-apply presets. The `--outsuffix` option is optional and prevents AutoLevels from creating an output image if its value ends with ".xmp".
+
+If you want to call AutoLevels with the `--export darktable` option outside of darktable, note that darktable only reads XMP files on import if you have activated the `look for updated XMP files on startup` option in preferences/storage.
