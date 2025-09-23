@@ -1,6 +1,6 @@
 # Changelog
 ### v1.3.0
-Release date: 2025-08-20
+Release date: 2025-09-23
 - New export feature for darktable XMP files
 - Preserve EXIF and embedded ICC profiles in TIFF, PNG, WebP
 
