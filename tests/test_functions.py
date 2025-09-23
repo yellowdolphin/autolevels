@@ -1,4 +1,3 @@
-from multiprocessing.context import get_spawning_popen
 import pytest
 from autolevels import make_comment
 from autolevels.export import (fit_rgb_curves, compute_monotone_hermite_slopes, hermite_eval, create_basic_xmp, 

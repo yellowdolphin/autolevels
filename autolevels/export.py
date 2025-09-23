@@ -422,8 +422,13 @@ def create_basic_xmp(xmp_file, pil_img):
     date_time_original = date_time_original or mtime_str
 
     # Read and update template XMP file
-    template = resources.files('autolevels.data') / 'dt_template_v5.xmp'
-    xmp = template.read_text()
+    if sys.version_info >= (3, 10):
+        template = resources.files('autolevels.data') / 'dt_template_v5.xmp'
+        xmp = template.read_text()
+    else:
+        # Python 3.9 fallback
+        with resources.open_text('autolevels.data', 'dt_template_v5.xmp') as f:
+            xmp = f.read()
     xmp = xmp.replace('DateTimeOriginal=""', f'DateTimeOriginal="{date_time_original}"')
     xmp = xmp.replace('DerivedFrom="-1"', f'DerivedFrom="{derived_from}"')
     xmp = xmp.replace('import_timestamp="-1"', f'import_timestamp="{import_timestamp}"')
