@@ -23,7 +23,7 @@ AutoLevels helps you fix these issues by letting you choose sensible target blac
 
 ## Installation
 
-If you have Python 3.9 or later installed on a Linux or MacOS machine, open a shell and execute:
+Python 3.9 or later is required. On most Linux distributions, this is already pre-installed. Otherwise, download it from [Python.org](https://www.python.org/downloads/) or install it via your favourite app store. Make sure you mark the checkbox "Add Python executable to PATH". Then, to install AutoLevels, open a shell (cmd on Windows) and execute:
 
 ```bash
 pip install autolevels
@@ -128,9 +128,9 @@ This leaves you with defining input and output files and paths. AutoLevels gives
 
 ### Exporting darktable XMP files
 
-You can use AutoLevels as an automatic preprocessing step in a non-destructive workflow using [darktable](https://www.darktable.org). The idea is to establish a baseline color correction with the `--model` option and export the curves to darktable, where you can fine-tune them or proceed with your normal darktable workflow.
+You can use AutoLevels as an automatic preprocessing step in a professional, non-destructive workflow using [darktable](https://www.darktable.org). The idea is to establish a baseline color correction with the `--model` option and export the curves to darktable, where you can fine-tune them or proceed with your normal darktable workflow.
 
-The recommended way to use AutoLevels curves in darktable is to install the [darktable-autolevels-module](https://github.com/yellowdolphin/darktable-autolevels-module) Lua script, which you can activate via the _scripts_ module in the lighttable view. An _AutoLevels_ module will appear in the same panel. Click the little file browser button to search for the downloaded .onnx file. Then select images and press the "add AutoLevels curve" button. Changing to the darkroom, you will find a new history item that adds an _rgb curve_ instance in mode "RGB, independent channels". Feel free to make adjustments to the curves, the original curves will remain in the history.
+The recommended way to use AutoLevels curves in darktable is to install the [darktable-autolevels-module](https://github.com/yellowdolphin/darktable-autolevels-module) Lua script, which you can activate via the _scripts_ module in the lighttable view. An _AutoLevels_ module will appear in the same panel. Click the little file browser button to search for the downloaded .onnx file. Then select images and press the "add AutoLevels curve" button. Changing to the darkroom, you will find a new history item that adds an _rgb curve_ instance in mode "RGB, independent channels". Feel free to make adjustments to the curves, the original curves will remain in the history, until you compress it.
 
 You might notice that the _rgb curve_ instance created by AutoLevels is applied right before the _input color profile_ module. This is where the channel-wise color correction works most effectively for JPEGs and most HDR images (RAW formats are not yet supported by the script). If you create a new _rgb curve_ instance, this will appear at the usual place in the pipeline.
 
