@@ -1,4 +1,8 @@
 # Changelog
+### v1.3.1
+Release date: 2025-10-31
+- Avoid onnxruntime bug on win32
+
 ### v1.3.0
 Release date: 2025-09-23
 - New export feature for darktable XMP files
