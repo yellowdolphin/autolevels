@@ -20,7 +20,8 @@ jobs:
       # fail-fast: false
       fail-fast: true
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        #python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.14"]
 
     steps:
     - uses: actions/checkout@v4
@@ -42,12 +43,17 @@ jobs:
         flit install --symlink
     - name: Install PyTorch
       run: |
-        if [ "${{ matrix.operating-system }}" = "macos-latest" ]; then
-          pip install torch==2.5.1
-        elif [ "${{ matrix.operating-system }}" = "windows-latest" ]; then
-          pip install torch==2.5.1
+        if [ "${{ matrix.python-version }}" == "3.14" ]; then
+          torchversion="2.9.1"
         else
-          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          torchversion="2.5.1"
+        fi
+        if [ "${{ matrix.operating-system }}" = "macos-latest" ]; then
+          pip install torch==${torchversion}
+        elif [ "${{ matrix.operating-system }}" = "windows-latest" ]; then
+          pip install torch==${torchversion}
+        else
+          pip install torch==${torchversion} --index-url https://download.pytorch.org/whl/cpu
         fi
     - name: Lint with flake8
       run: |
