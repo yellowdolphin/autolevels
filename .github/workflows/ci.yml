@@ -34,7 +34,14 @@ jobs:
         pip install --upgrade flit
         flit install --symlink
     - name: Install onnxruntime
-      run: pip install onnxruntime
+      run: |
+        if [ "${{ matrix.python-version }}" == "3.14" ]; then
+          # nightly build supports python 3.14 (https://github.com/microsoft/onnxruntime/issues/26547)
+          pip install flatbuffers numpy packaging protobuf sympy
+          pip install --pre --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ onnxruntime
+        else
+          pip install onnxruntime
+        fi
     - name: Install PyTorch
       run: |
         if [ "${{ matrix.operating-system }}" = "macos-latest" ]; then
