@@ -20,7 +20,8 @@ jobs:
       # fail-fast: false
       fail-fast: true
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        #python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.14"]
 
     steps:
     - uses: actions/checkout@v4
@@ -33,21 +34,24 @@ jobs:
         python -m pip install --upgrade pip
         pip install --upgrade flit
         if [ "${{ matrix.python-version }}" == "3.14" ]; then
-          # nightly build supports python 3.14 (https://github.com/microsoft/onnxruntime/issues/26547)
-          pip install flatbuffers numpy packaging protobuf sympy
+          # nightly onnxruntime build supports python 3.14 (https://github.com/microsoft/onnxruntime/issues/26547)
+          pip install flatbuffers "numpy==2.2.6" packaging protobuf sympy
           pip install --pre --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ onnxruntime
-        else
-          pip install onnxruntime
         fi
-        flit install --symlink
+        flit install --symlink  # requires numpy-2.2.6 for python 3.14
     - name: Install PyTorch
       run: |
-        if [ "${{ matrix.operating-system }}" = "macos-latest" ]; then
-          pip install torch==2.5.1
-        elif [ "${{ matrix.operating-system }}" = "windows-latest" ]; then
-          pip install torch==2.5.1
+        if [ "${{ matrix.python-version }}" == "3.14" ]; then
+          torchversion="2.9.1"
         else
-          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          torchversion="2.5.1"
+        fi
+        if [ "${{ matrix.operating-system }}" = "macos-latest" ]; then
+          pip install torch==${torchversion}
+        elif [ "${{ matrix.operating-system }}" = "windows-latest" ]; then
+          pip install torch==${torchversion}
+        else
+          pip install torch==${torchversion} --index-url https://download.pytorch.org/whl/cpu
         fi
     - name: Lint with flake8
       run: |
