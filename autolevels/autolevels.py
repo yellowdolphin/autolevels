@@ -411,8 +411,8 @@ def process_channel(pix_black, pix_white, channel, L, norm=None):
     # channel, L, weight have same shape, but on github actions, this involves a dim of 257:
     #hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)
     # try workarounds:
-    bin_edges = np.arange(257)
-    hist = np.histogram(channel, bins=bin_edges, weights=weight)[0]
+    #hist = np.histogram(channel, bins=np.arange(257), weights=weight)[0]  # 2.5 x slower
+    hist, _ = np.histogram(channel.clip(0, 255), bins=256, range=(0, 256), weights=weight)
     norm = norm or channel.shape[0] * channel.shape[1]
 
     # Calculate blackpoint and whitepoint for this channel
