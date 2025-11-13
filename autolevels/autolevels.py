@@ -408,11 +408,11 @@ def get_blackpoint_whitepoint(array, maxvalue, mode, pixel_black, pixel_white):
 
 def process_channel(pix_black, pix_white, channel, L, norm=None):
     weight = np.where(channel >= L, 1, channel / L)
-    # channel, L, weight have same shape, but on github actions, this involves a dim of 257:
-    #hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)
-    # try workarounds:
-    #hist = np.histogram(channel, bins=np.arange(257), weights=weight)[0]  # 2.5 x slower
-    hist, _ = np.histogram(channel.clip(0, 255), bins=256, range=(0, 256), weights=weight)
+    # hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)
+    # channel, L, weight have same shape, but on github actions (python 3.14), this raises
+    # ValueError: operands could not be broadcast together with shapes (256,) (257,) (256,)
+    # This workaround is 3 x faster:
+    hist = np.bincount(np.asarray(channel).ravel(), weights=weight.ravel(), minlength=256)
     norm = norm or channel.shape[0] * channel.shape[1]
 
     # Calculate blackpoint and whitepoint for this channel
