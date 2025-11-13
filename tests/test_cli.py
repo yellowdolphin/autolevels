@@ -302,6 +302,8 @@ def test_icc_option(simulate):
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_piexif(simulate):
     """Test transferring EXIF data between JPEG images."""
+    print(f"TIFF_IMAGE (48-bit dummy): {TIFF_IMAGE}")
+    print(f"DEFAULT_OUTPUT_IMAGE_PATH: {DEFAULT_OUTPUT_IMAGE_PATH} (adding EXIF tag)")
     img = Image.open(TIFF_IMAGE)
     tag, value = piexif.ExifIFD.FNumber, (56, 10)
     exif_dict = {"Exif": {tag: value}}
@@ -309,23 +311,30 @@ def test_piexif(simulate):
     fn = DEFAULT_OUTPUT_IMAGE_PATH
     img.save(fn, exif=exif_bytes)
     output_image_path = Path(fn).parent / (Path(fn).stem + '_al.jpg')
+    print(f"deleting {output_image_path}...")
     Path(output_image_path).unlink(missing_ok=True)
     result = run_autolevels(f'{simulate} --outdir images --outsuffix _al.jpg -- {fn}')
     assert result.returncode == 0
+    print(f"al processed {fn} with simulate={simulate}, checking output_image_path exists: {output_image_path}")
     assert output_image_path.exists() != bool(simulate)
     if not bool(simulate):
         # test EXIF has been transferred
+        print(f"checking if EXIF tag exists in {output_image_path}...")
         img = Image.open(output_image_path)
         exif_dict_out = img._getexif()
         assert exif_dict is not None, 'no EXIF'
         assert exif_dict_out[tag] == 5.6, f'wrong EXIF value: {exif_dict_out[tag]}'
+    print(f"deleting {output_image_path}...")
     Path(output_image_path).unlink(missing_ok=True)
     for fn, outsuffix in ((DEFAULT_OUTPUT_IMAGE_PATH, '_al.tif'), (PNG_IMAGE, '_al.jpg')):
         # test: no error if EXIF is unsupported
         output_image_path = Path(fn).parent / (Path(fn).stem + outsuffix)
+        print(f"running al on {fn} with outsuffix {outsuffix} and simulate={simulate}...")
         result = run_autolevels(f'{simulate} --outdir images --outsuffix {outsuffix} -- {fn}')
         assert result.returncode == 0
+        print(f"checking if output_image_path exists: {output_image_path}...")
         assert output_image_path.exists() != bool(simulate)
+        print(f"deleting {output_image_path}...")
         Path(output_image_path).unlink(missing_ok=True)
 
 
