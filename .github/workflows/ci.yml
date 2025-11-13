@@ -5,7 +5,7 @@ name: Python package, lint, test
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "debug-github-pytest" ]
   pull_request:
     branches: [ "master" ]
 
