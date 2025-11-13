@@ -61,6 +61,21 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=11 --max-line-length=127 --statistics
+    - name: compare c-bindings
+      run: |
+        echo "System: $(uname -a)"
+        echo "GLIBC: $(ldd --version | head -1)"
+        echo "GCC libs:"
+        ldconfig -p | grep -E "(libstdc\+\+|libgomp)" | head -5
+        echo ""
+        echo "Python build:"
+        python -VV
+        echo ""
+        echo "Package locations and key .so deps:"
+        for pkg in numpy onnxruntime cv2 PIL torch; do
+          echo "=== $pkg ==="
+          python -c "import $pkg; print($pkg.__version__, $pkg.__file__)" 2>/dev/null
+        done
     - name: Test with pytest
       run: |
-        pytest
+        pytest -vv --tb=long
