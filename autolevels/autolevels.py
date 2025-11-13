@@ -408,7 +408,12 @@ def get_blackpoint_whitepoint(array, maxvalue, mode, pixel_black, pixel_white):
 
 def process_channel(pix_black, pix_white, channel, L, norm=None):
     weight = np.where(channel >= L, 1, channel / L)
-    hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)
+    # channel, L, weight have same shape, but on github actions, this involves a dim of 257:
+    try:
+        hist, _ = np.histogram(channel, bins=256, range=(0, 256), weights=weight)
+    except ValueError as e:
+        print(f"channel shape: {channel.shape}, L shape: {L.shape}, weight shape: {weight.shape}")
+        raise e
     norm = norm or channel.shape[0] * channel.shape[1]
 
     # Calculate blackpoint and whitepoint for this channel
