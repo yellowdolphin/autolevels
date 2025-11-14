@@ -2,6 +2,7 @@ import pytest
 from autolevels import make_comment
 from autolevels.export import (fit_rgb_curves, compute_monotone_hermite_slopes, hermite_eval, create_basic_xmp, 
                                check_missing, append_rgbcurve_history_item, local_name, check_darktable_version)
+from autolevels import process_channel
 from PIL import Image
 import numpy as np
 from pathlib import Path
@@ -178,3 +179,18 @@ def test_append_rgbcurve_history_item():
             assert li['params'] == "gz48eJzjZBgFowABWAbaAaNgwAEAMNgADg=="
 
     xmp_file.unlink()  # Clean up after test
+
+
+def test_process_channel():
+    a = np.array([[5, 128, 255]], dtype=np.uint8)
+    channel = Image.fromarray(a)
+    L = np.array([[0., 0., 0.]])
+    pix_black = 0
+    pix_white = 0
+    bp, wp = process_channel(pix_black, pix_white, channel, L, norm=None)
+    assert bp == 5
+    assert wp == 255
+    pix_white = 0.4
+    bp, wp = process_channel(pix_black, pix_white, channel, L, norm=None)
+    assert bp == 5
+    assert wp == 128
