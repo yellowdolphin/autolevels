@@ -1,4 +1,9 @@
 # Changelog
+### v1.3.2
+Release date:
+- Support Python 3.14
+- Fix UTF-8 file names on Windows
+
 ### v1.3.1
 Release date: 2025-10-31
 - Avoid onnxruntime bug on win32
