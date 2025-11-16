@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-__version__ = '1.3.1'
+__version__ = '1.3.2'
 
 from pathlib import Path
 from argparse import ArgumentParser
 import sys
 from concurrent.futures import ThreadPoolExecutor
-import io
+from io import BytesIO
 
 import numpy as np
 from PIL import Image, ImageFilter, ImageCms
@@ -271,6 +271,76 @@ def evaluate_fstring(s: str, x):
     # Safely format the string using str.format
     result = formatted_str.format(x)
     return result
+
+
+def imread_unicode(fn, flags=cv2.COLOR_BGR2RGB, bytes=None):
+    """Unicode-safe cv2.imread replacement.
+
+    Args:
+        fn (str | Path): File name or Path
+        flags (int, optional): OpenCV flags for image decoding. Default: cv2.COLOR_BGR2RGB
+        bytes (bytes, optional): Bytes object with pixel data. Default: None
+
+    Returns:
+        np.ndarray: Decoded image array
+        or str: Error message
+
+    Handles all known errors, supports 16-bit images.
+    """
+    # The bytes object for decoding is always uint8, regardless of pixel depth
+    if bytes is None:
+        try:
+            array = np.frombuffer(Path(fn).read_bytes(), np.uint8)
+        except Exception as e:
+            return f"Could not read {fn}: {e}"
+    else:
+        array = np.frombuffer(bytes, np.uint8)
+
+    if len(array) == 0:
+        return f"{fn} is an empty file, no image data found"
+
+    # Decode image and convert to RGB
+    array = cv2.imdecode(array, cv2.IMREAD_UNCHANGED)
+    if array is None:
+        return f"cv2 could not decode {fn}"
+    try:
+        array = cv2.cvtColor(array, flags)
+    except ValueError as e:
+        return f"cv2 could not convert {fn} to RGB: {e}"
+    return array
+
+
+def imwrite_unicode(path, array, default_ext='.jpeg', params=None):
+    """
+    Unicode-safe replacement for cv2.imwrite().
+
+    Args:
+        path (str | Path): File name or Path
+        array (np.ndarray): Image array
+        default_ext (str, optional): File extension if path has no suffix. Default: '.jpeg'
+        params (list, optional): OpenCV parameters for image encoding. Default: None
+
+    Returns:
+        bool: True if successful, False otherwise
+
+    Works for any filename (UTF-8), and supports 8-bit and 16-bit images.
+    """
+    ext = Path(path).suffix or default_ext
+
+    # Encode via OpenCV → returns a uint8 buffer containing PNG/JPEG/TIFF/etc. file bytes
+    array = cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
+    success, encoded = cv2.imencode(ext, array, params or [])
+    if not success:
+        print(f"Could not encode {path}")
+        return False
+
+    # Write encoded bytes using Python’s Unicode-aware file I/O
+    try:
+        Path(path).write_bytes(encoded.tobytes())
+    except Exception as e:
+        print(f"Could not write {path}: {e}")
+        return False
+    return True
 
 
 def get_channel_cutoff(hist, thresh, upper=False, norm=None):
@@ -658,16 +728,17 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             out_fn = (outdir or fn.parent) / f'{stem}{suf}'
         # TODO: check out_fn exists, add option -f to overwrite
 
-        # Open image if possible
+        # Open image with PIL for metadata
         try:
             # This should work with file names, BytesIO, and streamlit.UploadedFile objects
-            pil_img = Image.open(fn if (images is None) else io.BytesIO(images[i]))
+            pil_img = Image.open(fn if (images is None) else BytesIO(images[i]))
         except Exception as e:
             print(f'Error: skipping {fn}, {e}')
             if callback is not None:
                 callback(str(fn), False, f'Error: broken or unsupported image format (skipping) {fn}')
             continue
 
+        # Open/decode image with cv2 to get actual pixel array
         if arg.icc_profile and arg.reset_icc:
             # Convert from sRGB to ICC profile
             try:
@@ -678,20 +749,9 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         else:
             if images is not None:
                 # Unpack streamlit.UploadedFile for cv2 with unknown bit-depth
-                try:
-                    array = cv2.cvtColor(cv2.imdecode(
-                        np.frombuffer(io.BytesIO(images[i]).read(), np.uint8), cv2.IMREAD_UNCHANGED
-                        ), cv2.COLOR_BGR2RGB)
-                except ValueError:
-                    try:
-                        print(f"image {fn} is not 8-bit, trying 16-bit...")
-                        array = cv2.cvtColor(cv2.imdecode(
-                            np.frombuffer(io.BytesIO(images[i]).read(), np.uint16), cv2.IMREAD_UNCHANGED
-                            ), cv2.COLOR_BGR2RGB)
-                    except ValueError as e:
-                        return f"cv2 decoding error: {e}"
+                array = imread_unicode(fn, bytes=BytesIO(images[i]).read())
             else:
-                array = cv2.cvtColor(cv2.imread(fn, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
+                array = imread_unicode(fn)
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255
 
         # Check conditions for 48-bit output
@@ -839,7 +899,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
         if out_48bit:
             array = (array * 65535).round().clip(0, 65535).astype('uint16')
-            cv2.imwrite(out_fn, cv2.cvtColor(array, cv2.COLOR_RGB2BGR))
+            imwrite_unicode(out_fn, array, default_ext='.png')
         else:
             array = (array * 255).round().clip(0, 255).astype('uint8')
 
@@ -907,7 +967,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             comment = make_comment(pil_img, __version__, cli_params)
 
             if return_bytes:
-                out_fn = io.BytesIO()
+                out_fn = BytesIO()
                 comment = ''
                 kwargs['format'] = img.format
 
