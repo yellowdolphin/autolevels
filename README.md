@@ -51,9 +51,17 @@ and specify the downloaded .onnx file using the `--model` option:
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx -- example.jpg
 ```
 
+### Windows 10
+
+The latest versions of onnxruntime don't support Windows 10. To use autolevels with automatic color correction on Windows 10, install Python version 3.13 or earlier (but not before version 3.9), then install autolevels (see above) and onnxruntime version 1.20.1:
+
+```bash
+pip install onnxruntime==1.20.1
+```
+
 ## Graphical User Interface
 
-If you prefer a graphical user interface, you can checkout [RetroShine](https://retroshine.eu), which provides a user-friendly interface for AutoLevels.
+If you prefer a graphical user interface, you can checkout [RetroShine](https://retroshine.eu), which is easier to install and provides a user-friendly interface for AutoLevels.
 
 ## Documentation
 

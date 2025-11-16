@@ -16,8 +16,7 @@ dependencies = [
     "piexif>=1.1.1,<2.0.0",
     "opencv-python",
     "h5py",
-    "onnxruntime; sys_platform != 'win32'",
-    "onnxruntime<1.21.0; sys_platform == 'win32'",
+    "onnxruntime",
 ]
 classifiers = [
     "Programming Language :: Python :: 3.9",
