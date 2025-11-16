@@ -10,7 +10,6 @@ import piexif
 
 # Define path to the test image
 TEST_IMAGE = 'images/lübeck.jpg'
-DEFAULT_OUTPUT_IMAGE_PATH = Path('images/lübeck_al.jpg')
 MODEL = 'models/free_test.pt'
 ONNX_MODEL = 'models/free_test.onnx'
 
@@ -32,14 +31,6 @@ PNG_IMAGE = "images/48bit_rgb.png"
 TIFF_IMAGE = "images/48bit_rgb.tiff"
 cv2.imwrite(PNG_IMAGE, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
 cv2.imwrite(TIFF_IMAGE, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
-
-
-@pytest.fixture(autouse=True)
-def remove_output_image():
-    """Fixture to remove output image if it exists before/after each test."""
-    DEFAULT_OUTPUT_IMAGE_PATH.unlink(missing_ok=True)
-    yield
-    DEFAULT_OUTPUT_IMAGE_PATH.unlink(missing_ok=True)
 
 
 def run_autolevels(args):
@@ -73,52 +64,56 @@ def test_version_option(simulate):
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_default_run(simulate):
+def test_default_run(simulate, tmp_path):
     """Test autolevels with default options."""
-    result = run_autolevels(f'{simulate} --outdir images -- {TEST_IMAGE}')
+    output_image_path = tmp_path / (Path(TEST_IMAGE).stem + '_al.jpg')
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} -- {TEST_IMAGE}')
     assert result.returncode == 0
     if simulate:
         assert 'black point: [111  97 115] -> [81 67 85]' in result.stdout
         assert 'white point: [254 251 248] -> [254 251 248]' in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_blackpoint_option(simulate):
+def test_blackpoint_option(simulate, tmp_path):
     """Test --blackpoint option with single and RGB values."""
-    result = run_autolevels(f'{simulate} --outdir images --blackpoint 10 --mode smooth -- {TEST_IMAGE}')
+    output_image_path = tmp_path / (Path(TEST_IMAGE).stem + '_al.jpg')
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --blackpoint 10 --mode smooth -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'black point: [72 57 58] -> [42 27 28]' in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --blackpoint 10 --mode smooth --maxblack 75 -- {TEST_IMAGE}')
+    assert output_image_path.exists() != bool(simulate)
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --blackpoint 10 --mode smooth --maxblack 75 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'black point: [72 57 58] -> [10 10 10]' in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --blackpoint 0 14 255 --mode smooth --maxblack 75 -- {TEST_IMAGE}')
+    assert output_image_path.exists() != bool(simulate)
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --blackpoint 0 14 255 --mode smooth --maxblack 75 -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
     assert 'black point: [72 57 58] -> [ 0 14 58]' in result.stdout
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_whitepoint_option(simulate):
+def test_whitepoint_option(simulate, tmp_path):
     """Test --whitepoint option with single and RGB values."""
-    result = run_autolevels(f'{simulate} --outdir images --whitepoint 255 -- {TEST_IMAGE}')
+    output_image_path = tmp_path / (Path(TEST_IMAGE).stem + '_al.jpg')
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'white point: [254 251 248] -> [255 255 255]' in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --whitepoint 200 210 252 -- {TEST_IMAGE}')
+    assert output_image_path.exists() != bool(simulate)
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 200 210 252 -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
     assert 'white point: [254 251 248] -> [254 251 252]' in result.stdout
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_blackclip_whiteclip_options(simulate):
+def test_blackclip_whiteclip_options(simulate, tmp_path):
     """Test --blackclip and --whiteclip options with various percentages."""
-    result = run_autolevels(f'{simulate} --outdir images --blackclip 0.007 --whiteclip 0.003 -- {TEST_IMAGE}')
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --blackclip 0.007 --whiteclip 0.003 -- {TEST_IMAGE}')
+    output_image_path = tmp_path / (Path(TEST_IMAGE).stem + '_al.jpg')
     assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
     if simulate:
         assert 'black point: [127 110 129]' in result.stdout
         assert 'white point: [251 251 247]' in result.stdout
@@ -127,217 +122,251 @@ def test_blackclip_whiteclip_options(simulate):
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_maxblack_minwhite_options(simulate):
+def test_maxblack_minwhite_options(simulate, tmp_path):
     """Test --maxblack and --minwhite options with L and RGB values."""
-    result = run_autolevels(f'{simulate} --outdir images --max-blackshift 10 --maxblack 100 -- {TEST_IMAGE}')
+    output_image_path = tmp_path / (Path(TEST_IMAGE).stem + '_al.jpg')
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --max-blackshift 10 --maxblack 100 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'black point: [111  97 115] -> [101  87 105]' in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --max-blackshift 10 --maxblack 120 -- {TEST_IMAGE}')
+    assert output_image_path.exists() != bool(simulate)
+    output_image_path.unlink(missing_ok=True)
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --max-blackshift 10 --maxblack 120 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'black point: [111  97 115] -> [14 14 14]' in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
+    output_image_path.unlink(missing_ok=True)
 
-    result = run_autolevels(f'{simulate} --outdir images --whitepoint 255 --minwhite 255 -- {TEST_IMAGE}')
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 --minwhite 255 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'white point: [254 251 248] -> [255 252 249]' in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --whitepoint 255 --minwhite 255 --max-whiteshift 0 -- {TEST_IMAGE}')
+    assert output_image_path.exists() != bool(simulate)
+    output_image_path.unlink(missing_ok=True)
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 --minwhite 255 --max-whiteshift 0 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert ('white point: [254 251 248] -> [254 251 248]' in result.stdout) or ('white point:' not in result.stdout)
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --whitepoint 255 --minwhite 200 --max-whiteshift 0 -- {TEST_IMAGE}')
+    assert output_image_path.exists() != bool(simulate)
+    output_image_path.unlink(missing_ok=True)
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 --minwhite 200 --max-whiteshift 0 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert ('white point: [254 251 248] -> [254 251 248]' in result.stdout) or ('white point:' not in result.stdout)
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --whitepoint 255 --minwhite 255 --max-whiteshift 255 -- {TEST_IMAGE}')
+    assert output_image_path.exists() != bool(simulate)
+    output_image_path.unlink(missing_ok=True)
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 --minwhite 255 --max-whiteshift 255 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'white point: [254 251 248] -> [255 252 249]' in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --whitepoint 255 --minwhite 200 --max-whiteshift 255 -- {TEST_IMAGE}')
+    assert output_image_path.exists() != bool(simulate)
+    output_image_path.unlink(missing_ok=True)
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 --minwhite 200 --max-whiteshift 255 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'white point: [254 251 248] -> [255 255 255]' in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --minwhite 200 --max-whiteshift 255 -- {TEST_IMAGE}')
+    assert output_image_path.exists() != bool(simulate)
+    output_image_path.unlink(missing_ok=True)
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --minwhite 200 --max-whiteshift 255 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert ('white point: [254 251 248] -> [254 251 248]' in result.stdout) or ('white point:' not in result.stdout)
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
+    output_image_path.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_mode_option(simulate):
+def test_mode_option(simulate, tmp_path):
+    outdir = tmp_path
+    fn = Path(TEST_IMAGE)
+    output_image_path = outdir / (fn.stem + '_al.jpg')
     """Test --mode option with all valid values."""
     for mode in ["smooth", "smoother", "hist", "perceptive"]:
-        result = run_autolevels(f'{simulate} --outdir images --mode {mode} -- {TEST_IMAGE}')
+        result = run_autolevels(f'{simulate} --outdir {outdir} --mode {mode} -- {fn}')
         assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+        assert output_image_path.exists() != bool(simulate)
+        output_image_path.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_gamma_option(simulate):
+def test_gamma_option(simulate, tmp_path):
     """Test --gamma option with L and RGB values."""
-    result = run_autolevels(f'{simulate} --outdir images --gamma 1.2 -- {TEST_IMAGE}')
-    assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    result = run_autolevels(f'{simulate} --outdir images --gamma 1.0 0.8 1.2 -- {TEST_IMAGE}')
-    assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-
-
-@pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_saturation_options(simulate):
-    """Test saturation-related options."""
-    for wensat in ["", "--saturation-first", "--saturation-before-gamma"]:
-        result = run_autolevels(f'{simulate} --outdir images {wensat} --saturation 0.0 -- {TEST_IMAGE}')
+    outdir = tmp_path
+    fn = Path(TEST_IMAGE)
+    output_image_path = outdir / (fn.stem + '_al.jpg')
+    for gamma in ('1.2', '1.0 0.8 1.2'):
+        result = run_autolevels(f'{simulate} --outdir {outdir} --gamma {gamma} -- {fn}')
         assert result.returncode == 0
-        assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+        assert output_image_path.exists() != bool(simulate)
+        output_image_path.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_output_options(simulate):
+def test_saturation_options(simulate, tmp_path):
+    """Test saturation-related options."""
+    outdir = tmp_path
+    fn = Path(TEST_IMAGE)
+    output_image_path = outdir / (fn.stem + '_al.jpg')
+    for wensat in ["", "--saturation-first", "--saturation-before-gamma"]:
+        result = run_autolevels(f'{simulate} --outdir {outdir} {wensat} --saturation 0.0 -- {fn}')
+        assert result.returncode == 0
+        assert output_image_path.exists() != bool(simulate)
+        output_image_path.unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("simulate", ['--simulate', ''])
+def test_output_options(simulate, tmp_path):
     """Test file location options folder, prefix, suffix, etc."""
-    output_fn = DEFAULT_OUTPUT_IMAGE_PATH.parent / 'tmp' / 'koblenz.jpg'
-    output_fn.unlink(missing_ok=True)
-    print("output_fn:", output_fn)
+    outdir = tmp_path
+    output_image_path = outdir / 'koblenz.jpg'
     result = run_autolevels(f'{simulate} --folder images --prefix lü --suffix eck.jpg '
-                            '--outdir images/tmp --outprefix ko --outsuffix lenz.jpg -- b')
+                            f'--outdir {outdir} --outprefix ko --outsuffix lenz.jpg -- b')
     assert result.returncode == 0
-    assert output_fn.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
     if simulate:
-        assert ' -> images/tmp/koblenz.jpg' in result.stdout
-    output_fn.unlink(missing_ok=True)
-    if output_fn.parent.exists():
-        Path(output_fn.parent).rmdir()
+        assert f' -> {output_image_path}' in result.stdout
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_fstring_options(simulate):
+def test_fstring_options(simulate, tmp_path):
     """Test --fstring options"""
-    output_fn = DEFAULT_OUTPUT_IMAGE_PATH.parent / 'tmp' / 'koblenz.jpg'
-    output_fn.unlink(missing_ok=True)
-    result = run_autolevels(simulate + ' --folder images --fstring f"lü{x:^.1s}eck.jpg" --outfstring "ko{x:<.1s}lenz.jpg" '
-                            '--outdir images/tmp -- b')
+    outdir = tmp_path
+    output_image_path = outdir / 'koblenz.jpg'
+    result = run_autolevels(f'{simulate} --outdir {outdir} --folder images '
+                            '--fstring    f"lü{x:^.1s}eck.jpg" '
+                            '--outfstring "ko{x:<.1s}lenz.jpg" '
+                            f'-- b')
     assert result.returncode == 0
-    assert output_fn.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
     if simulate:
-        assert ' -> images/tmp/koblenz.jpg' in result.stdout
-    output_fn.unlink(missing_ok=True)
-    if output_fn.parent.exists():
-        Path(output_fn.parent).rmdir()
+        assert f' -> {output_image_path}' in result.stdout
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_glob_pattern(simulate):
+def test_glob_pattern(simulate, tmp_path):
     """Test glob patterns like *.jpg"""
-    result = run_autolevels(simulate + ' --outdir images --mode smooth --folder images -- *.jpg')
+    outdir = tmp_path
+    result = run_autolevels(f'{simulate} --outdir {outdir} --mode smooth --folder images -- *.jpg')
     assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
-    # Cleanup images other than DEFAULT_OUTPUT_IMAGE_PATH
-    for p in Path('images').glob('*_al.jpg'):
-        p.unlink()
+    for fn in Path('images').glob('*.jpg'):
+        output_image_path = outdir / (fn.stem + '_al.jpg')
+        assert output_image_path.exists() != bool(simulate)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_reproduce_option(simulate):
+def test_reproduce_option(simulate, tmp_path):
     """Test --reproduce option using a previous output image."""
+    outdir = tmp_path
+    outsuffix = '_previous.jpg'
+    output_image_path = outdir / (Path(TEST_IMAGE).stem + outsuffix)
     repro_options = "--blackpoint 42 --whitepoint 242 252 255 --mode smooth --saturation 0.8 --max-whiteshift 3"
-    _ = run_autolevels(f'{repro_options} --outdir images --outsuffix _previous.jpg -- {TEST_IMAGE}')
-    previous_image = DEFAULT_OUTPUT_IMAGE_PATH.parent / DEFAULT_OUTPUT_IMAGE_PATH.name.replace('_al', '_previous')
+    _ = run_autolevels(f'{repro_options} --outdir {outdir} --outsuffix {outsuffix} -- {TEST_IMAGE}')
+    previous_image = output_image_path
     assert previous_image.exists()
-    result = run_autolevels(f'{simulate} --outdir images --reproduce {previous_image} -- {TEST_IMAGE}')
+    output_image_path = outdir / (Path(TEST_IMAGE).stem + '_al.jpg')
+    result = run_autolevels(f'{simulate} --outdir {outdir} --reproduce {previous_image} -- {TEST_IMAGE}')
     previous_image.unlink()
     assert result.returncode == 0
     assert repro_options in result.stdout
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_model_option(simulate):
+def test_model_option(simulate, tmp_path):
     """Test --model option using free curve inference with MODEL."""
-    result = run_autolevels(f'{simulate} --outdir images --model {MODEL} -- {TEST_IMAGE}')
+    outdir = tmp_path
+    output_image_path = outdir / (Path(TEST_IMAGE).stem + '_al.jpg')
+    result = run_autolevels(f'{simulate} --outdir {outdir} --model {MODEL} -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_model_option_with_saturation_first(simulate):
+def test_model_option_with_saturation_first(simulate, tmp_path):
     """Test --model and --saturation-first options."""
-    result = run_autolevels(f'{simulate} --outdir images --model {MODEL} --saturation-first --saturation 0.8 -- {TEST_IMAGE}')
+    outdir = tmp_path
+    output_image_path = outdir / (Path(TEST_IMAGE).stem + '_al.jpg')
+    result = run_autolevels(f'{simulate} --outdir {outdir} --model {MODEL} --saturation-first --saturation 0.8 -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_onnx(simulate):
+def test_onnx(simulate, tmp_path):
     """Test --model option using onnx instead of torch."""
-    result = run_autolevels(f'{simulate} --outdir images --model {ONNX_MODEL} -- {TEST_IMAGE}')
+    outdir = tmp_path
+    output_image_path = outdir / (Path(TEST_IMAGE).stem + '_al.jpg')
+    result = run_autolevels(f'{simulate} --outdir {outdir} --model {ONNX_MODEL} -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_48bit_images(simulate):
+def test_48bit_images(simulate, tmp_path):
     """Test --model option with 48bit images."""
     for fn in (PNG_IMAGE, TIFF_IMAGE):
-        output_image_path = Path(fn).parent / (Path(fn).stem + '_al' + Path(fn).suffix)
-        Path(output_image_path).unlink(missing_ok=True)
-        result = run_autolevels(f'{simulate} --outdir images --model {MODEL} -- {fn}')
+        outdir = tmp_path
+        output_image_path = outdir / (Path(fn).stem + '_al' + Path(fn).suffix)
+        output_image_path.unlink(missing_ok=True)
+        result = run_autolevels(f'{simulate} --outdir {outdir} --model {MODEL} -- {fn}')
         assert result.returncode == 0
         assert output_image_path.exists() != bool(simulate)
-        Path(output_image_path).unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_icc_option(simulate):
+def test_icc_option(simulate, tmp_path):
     """Test --icc-profile option with 48bit images."""
     for fn in (PNG_IMAGE, TIFF_IMAGE):
-        output_image_path = Path(fn).parent / (Path(fn).stem + '_al.jpg')
-        Path(output_image_path).unlink(missing_ok=True)
-        result = run_autolevels(f'{simulate} --outdir images --outsuffix _al.jpg --icc-profile {ICC_PROFILE} -- {fn}')
+        outdir = tmp_path
+        output_image_path = outdir / (Path(fn).stem + '_al.jpg')
+        output_image_path.unlink(missing_ok=True)
+        result = run_autolevels(f'{simulate} --outdir {outdir} --outsuffix _al.jpg --icc-profile {ICC_PROFILE} -- {fn}')
         assert result.returncode == 0
         assert output_image_path.exists() != bool(simulate)
-        Path(output_image_path).unlink(missing_ok=True)
+        output_image_path.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_piexif(simulate):
+def test_piexif(simulate, tmp_path):
     """Test transferring EXIF data between JPEG images."""
-    img = Image.open(TIFF_IMAGE)
     tag, value = piexif.ExifIFD.FNumber, (56, 10)
     exif_dict = {"Exif": {tag: value}}
     exif_bytes = piexif.dump(exif_dict)
-    fn = DEFAULT_OUTPUT_IMAGE_PATH
-    img.save(fn, exif=exif_bytes)
-    output_image_path = Path(fn).parent / (Path(fn).stem + '_al.jpg')
-    Path(output_image_path).unlink(missing_ok=True)
-    result = run_autolevels(f'{simulate} --outdir images --outsuffix _al.jpg -- {fn}')
+    fn = tmp_path / Path(TEST_IMAGE).name
+    with Image.open(TIFF_IMAGE) as img:
+        img.save(fn, exif=exif_bytes)
+
+    outdir = tmp_path
+    output_image_path = outdir / (Path(fn).stem + '_al.jpg')
+    output_image_path.unlink(missing_ok=True)
+    result = run_autolevels(f'{simulate} --outdir {outdir} --outsuffix _al.jpg -- {fn}')
     assert result.returncode == 0
     assert output_image_path.exists() != bool(simulate)
     if not bool(simulate):
         # test EXIF has been transferred
-        img = Image.open(output_image_path)
-        exif_dict_out = img._getexif()
+        with Image.open(output_image_path) as img:
+            exif_dict_out = img._getexif()
         assert exif_dict is not None, 'no EXIF'
         assert exif_dict_out[tag] == 5.6, f'wrong EXIF value: {exif_dict_out[tag]}'
-    Path(output_image_path).unlink(missing_ok=True)
-    for fn, outsuffix in ((DEFAULT_OUTPUT_IMAGE_PATH, '_al.tif'), (PNG_IMAGE, '_al.jpg')):
+    image_with_exif = Path(output_image_path)
+
+    for fn, outsuffix in ((image_with_exif, '_al.tif'), (PNG_IMAGE, '_al.jpg')):
         # test: no error if EXIF is unsupported
-        output_image_path = Path(fn).parent / (Path(fn).stem + outsuffix)
-        result = run_autolevels(f'{simulate} --outdir images --outsuffix {outsuffix} -- {fn}')
+        outdir = tmp_path
+        output_image_path = outdir / (Path(fn).stem + outsuffix)
+        output_image_path.unlink(missing_ok=True)
+        print(f"{simulate} --outdir {outdir} --outsuffix {outsuffix} -- {fn}")
+        result = run_autolevels(f'{simulate} --outdir {outdir} --outsuffix {outsuffix} -- {fn}')
         assert result.returncode == 0
-        assert output_image_path.exists() != bool(simulate)
-        Path(output_image_path).unlink(missing_ok=True)
+        assert output_image_path.exists() != bool(simulate), result.stdout + result.stderr
+        output_image_path.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_darktable_icc(simulate):
+def test_darktable_icc(simulate, tmp_path):
     """Test --icc option with darktable export."""
-    OUTPUT_XMP_PATH = Path(TEST_IMAGE).with_suffix(Path(TEST_IMAGE).suffix + '.xmp')
-    OUTPUT_XMP_PATH.unlink(missing_ok=True)
-    result = run_autolevels(f'{simulate} --outdir images --model {MODEL} --icc {ICC_PROFILE} --export darktable -- {TEST_IMAGE}')
+    fn = tmp_path / Path(TEST_IMAGE).name
+    from shutil import copyfile
+    copyfile(TEST_IMAGE, fn)
+    OUTPUT_XMP_PATH = fn.with_suffix(fn.suffix + '.xmp')
+    output_image_path = tmp_path / (Path(fn).stem + '_al.jpg')
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --model {MODEL} --icc {ICC_PROFILE} --export darktable -- {fn}')
     assert result.returncode == 0
     print(result.stdout)
-    assert DEFAULT_OUTPUT_IMAGE_PATH.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)
     assert OUTPUT_XMP_PATH.exists()
 
     # Verify content of final XMP
@@ -374,39 +403,43 @@ def test_darktable_icc(simulate):
             assert li['multi_priority'] == '1'
             assert li['multi_name'] == 'AutoLevels'
             assert li['multi_name_hand_edited'] == '1'
-    Path(DEFAULT_OUTPUT_IMAGE_PATH).unlink(missing_ok=True)
-    OUTPUT_XMP_PATH.unlink(missing_ok=True)
 
 
-def test_darktable_without_export_arg():
+def test_darktable_without_export_arg(tmp_path):
     """Test --outsuffix .xmp without --export"""
-    outsuffix = Path(TEST_IMAGE).suffix + '.xmp'
-    OUTPUT_XMP_PATH = Path(TEST_IMAGE).parent / (Path(TEST_IMAGE).stem + outsuffix)
-    OUTPUT_XMP_PATH.unlink(missing_ok=True)
+    fn = tmp_path / Path(TEST_IMAGE).name
+    from shutil import copyfile
+    copyfile(TEST_IMAGE, fn)
+    outsuffix = fn.suffix + '.xmp'
+    OUTPUT_XMP_PATH = tmp_path / (fn.stem + outsuffix)
+    output_image_path = tmp_path / (Path(fn).stem + '_al.jpg')
 
-    result = run_autolevels(f'--outdir images --model {MODEL} --outsuffix {outsuffix} -- {TEST_IMAGE}')
+    result = run_autolevels(f'--outdir {tmp_path} --model {MODEL} --outsuffix {outsuffix} -- {fn}')
     assert result.returncode == 0
     print(result.stdout)
     assert OUTPUT_XMP_PATH.exists()
-    OUTPUT_XMP_PATH.unlink(missing_ok=True)
+    assert not output_image_path.exists()
 
 
-def test_darktable_versions():
+def test_darktable_versions(tmp_path):
     """Test darktable export for various supported versions of darktable."""
     import xml.etree.ElementTree as ET
+    from shutil import copyfile
+    fn = tmp_path / Path(TEST_IMAGE).name
+    copyfile(TEST_IMAGE, fn)
 
     for dt_version in ["invalid", "4.8.1", "5.3.0+271~g2a9ae37bcc", "6.0.0"]:
-        outsuffix = '_01' + Path(TEST_IMAGE).suffix + '.xmp'
-        OUTPUT_XMP_PATH = Path(TEST_IMAGE).parent / (Path(TEST_IMAGE).stem + outsuffix)
-        OUTPUT_XMP_PATH.unlink(missing_ok=True)
+        outsuffix = '_01' + fn.suffix + '.xmp'
+        OUTPUT_XMP_PATH = tmp_path / (fn.stem + outsuffix)
+        output_image_path = tmp_path / (Path(fn).stem + '_al.jpg')
 
-        cmd = f'--outdir images --model {MODEL} --export darktable {dt_version} --outsuffix {outsuffix} -- {TEST_IMAGE}'
+        cmd = f'--outdir {tmp_path} --model {MODEL} --export darktable {dt_version} --outsuffix {outsuffix} -- {fn}'
         print(cmd)
         result = run_autolevels(cmd)
         assert result.returncode == 0
         print(result.stdout)
         assert 'no darktable version specified' not in result.stdout
-        assert not DEFAULT_OUTPUT_IMAGE_PATH.exists(), 'output image produced despite option --outsuffix'
+        assert not output_image_path.exists(), 'output image produced despite option --outsuffix'
         assert OUTPUT_XMP_PATH.exists() is False if (dt_version == 'invalid') else True
 
         # Verify content of final XMP
@@ -427,6 +460,3 @@ def test_darktable_versions():
         assert iop_order_list is not None
         print(iop_order_list)
         assert ('rasterfile' in iop_order_list) is False if (dt_version == '4.8.1') else True
-
-        OUTPUT_XMP_PATH.unlink(missing_ok=True)
-    Path(DEFAULT_OUTPUT_IMAGE_PATH).unlink(missing_ok=True)
