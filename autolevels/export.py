@@ -433,8 +433,8 @@ def create_basic_xmp(xmp_file, pil_img):
     xmp = xmp.replace('DerivedFrom="-1"', f'DerivedFrom="{derived_from}"')
     xmp = xmp.replace('import_timestamp="-1"', f'import_timestamp="{import_timestamp}"')
 
-    # Write basic XMP
-    with open(xmp_file, 'w') as f:
+    # Write basic XMP (for Windows, UTF-8 must be specified explicitly)
+    with open(xmp_file, 'w', encoding='utf-8') as f:
         f.write(xmp)
 
     return

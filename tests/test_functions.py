@@ -90,16 +90,16 @@ def test_fit_rgb_curves_linear():
                 assert max_err > MAX_ERROR, f'max_points: {max_points}, max_err: {max_err}'
 
 
-def test_create_basic_xmp_writes_file():
-    xmp_file = Path("test.xmp")
-    if xmp_file.exists():
-        xmp_file.unlink()  # Ensure file does not exist before test
-    assert not xmp_file.exists()
-
+def test_create_basic_xmp_writes_file(tmp_path):
+    xmp_file = tmp_path / "test.xmp"
     pil_img = Image.open("images/lübeck.jpg")
     create_basic_xmp(xmp_file, pil_img)
 
     assert xmp_file.exists()
+
+    # Verify proper UTF-8 encoding
+    with open(xmp_file, 'r', encoding='utf-8') as f:
+        content = f.read()
 
     # Verify content of basic XMP
     tree = ET.parse(xmp_file)
