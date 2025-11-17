@@ -179,19 +179,18 @@ def extract_arg(filename, parser):
     if not filename.exists():
         return f'Error: no file {filename}'
 
-    img = Image.open(filename)
+    with Image.open(filename) as img:
+        cli_params = ''
 
-    cli_params = ''
-
-    # parse JPEG comment
-    if hasattr(img, 'info') and 'comment' in img.info:
-        comment = img.info['comment'].decode()
-        comment = comment.split('\n')[-1]  # multiline: read only last
-        if 'autolevels ' in comment:
-            version = comment.split('autolevels ')[1].split(',')[0]
-            if version != __version__:
-                print(f'WARNING: autolevels version changed: {version} -> {__version__}')
-            cli_params += comment.split('params: ')[1]
+        # parse JPEG comment
+        if hasattr(img, 'info') and 'comment' in img.info:
+            comment = img.info['comment'].decode()
+            comment = comment.split('\n')[-1]  # multiline: read only last
+            if 'autolevels ' in comment:
+                version = comment.split('autolevels ')[1].split(',')[0]
+                if version != __version__:
+                    print(f'WARNING: autolevels version changed: {version} -> {__version__}')
+                cli_params += comment.split('params: ')[1]
 
     # parse CLI args
     new_namespace = parser.parse_args(cli_params.split())
@@ -745,6 +744,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 array = np.array(ImageCms.profileToProfile(pil_img, sRGB_profile, icc_profile))
             except ImageCms.PyCMSError as e:
                 print(e, "ICC probably has no B2A")
+                pil_img.close()
                 return "This ICC profile cannot be used for reverse transformation."
         else:
             if images is not None:
@@ -799,6 +799,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             # Simulate: just test inference on first image
             if arg.simulate and fn != fns[0]:
                 print(f'{fn} -> {out_fn}')
+                pil_img.close()
                 continue
 
             resized = cv2.resize(array, (384, 384)[::-1])  # uint16 or uint8
@@ -822,16 +823,19 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     print(f'Error: failed generating {xmp_file}, skipping darktable export.')
                     print(e)  # DEBUG
                     if skip_image_output:
+                        pil_img.close()
                         continue
 
                 if skip_image_output:
                     print(f'{fn} -> {xmp_file}')
+                    pil_img.close()
                     continue
 
             array = free_curve_map_image(array, free_curve)  # float32, range (0, 1)
 
             if arg.simulate:
                 print(f'{fn} -> {out_fn}')
+                pil_img.close()
                 continue
 
         else:
@@ -864,6 +868,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             if arg.simulate:
                 print(f'{fn} -> {out_fn} (black point: {blackpoint} -> {target_black.round().astype("int")}, '
                       f'white point: {whitepoint} -> {target_white.round().astype("int")})')
+                pil_img.close()
                 continue
 
             # Make target black/white points gamma-agnostic
@@ -981,6 +986,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
             if return_bytes:
                 # No EXIF is needed for previews
+                pil_img.close()
                 return out_fn.getvalue()
 
             # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
@@ -988,6 +994,9 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             piexif_supported = {'.jpg', '.jpeg'}
             if 'exif' in pil_img.info and (out_fn.suffix.lower() in piexif_supported) and images is None:
                 piexif.transplant(str(fn), str(out_fn))
+
+        # Clean up
+        pil_img.close()
 
         # Logging
         infos = [f'{fn} -> {out_fn}']
@@ -1002,7 +1011,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         # Callback
         if callback is not None:
             callback(str(fn), True, infos)
-
+        
 
 if __name__ == '__main__':
     main()

@@ -92,33 +92,33 @@ def test_fit_rgb_curves_linear():
 
 def test_create_basic_xmp_writes_file(tmp_path):
     xmp_file = tmp_path / "test.xmp"
-    pil_img = Image.open("images/lübeck.jpg")
-    create_basic_xmp(xmp_file, pil_img)
+    with Image.open("images/lübeck.jpg") as pil_img:
+        create_basic_xmp(xmp_file, pil_img)
 
-    assert xmp_file.exists()
+        assert xmp_file.exists()
 
-    # Verify proper UTF-8 encoding
-    with open(xmp_file, 'r', encoding='utf-8') as f:
-        content = f.read()
+        # Verify proper UTF-8 encoding
+        with open(xmp_file, 'r', encoding='utf-8') as f:
+            content = f.read()
 
-    # Verify content of basic XMP
-    tree = ET.parse(xmp_file)
-    root = tree.getroot()
-    description = root.find('.//rdf:Description', namespaces)
+        # Verify content of basic XMP
+        tree = ET.parse(xmp_file)
+        root = tree.getroot()
+        description = root.find('.//rdf:Description', namespaces)
 
-    mtime = datetime.fromtimestamp(Path("images/lübeck.jpg").stat().st_mtime, tz=timezone.utc).strftime("%Y:%m:%d %H:%M:%S.%f")[:-3]
-    assert description.get('{http://ns.adobe.com/exif/1.0/}DateTimeOriginal') == mtime
-    assert description.get('{http://ns.adobe.com/xap/1.0/mm/}DerivedFrom') == Path(pil_img.filename).name
-    assert description.get('{http://darktable.sf.net/}import_timestamp') != '-1'
+        mtime = datetime.fromtimestamp(Path("images/lübeck.jpg").stat().st_mtime, tz=timezone.utc).strftime("%Y:%m:%d %H:%M:%S.%f")[:-3]
+        assert description.get('{http://ns.adobe.com/exif/1.0/}DateTimeOriginal') == mtime
+        assert description.get('{http://ns.adobe.com/xap/1.0/mm/}DerivedFrom') == Path(pil_img.filename).name
+        assert description.get('{http://darktable.sf.net/}import_timestamp') != '-1'
 
-    missing, rgbcurve_num, history_end = check_missing(xmp_file)
-    assert missing == {'iop_order_list', 'auto_presets', 'history_basic_hash', 'history_current_hash'}
-    assert rgbcurve_num == '4', f'{rgbcurve_num}'  # anticipating default presets applied
-    assert history_end == '5', f'{history_end}'  # anticipating default presets applied
+        missing, rgbcurve_num, history_end = check_missing(xmp_file)
+        assert missing == {'iop_order_list', 'auto_presets', 'history_basic_hash', 'history_current_hash'}
+        assert rgbcurve_num == '4', f'{rgbcurve_num}'  # anticipating default presets applied
+        assert history_end == '5', f'{history_end}'  # anticipating default presets applied
 
-    # Test append_rgbcurve_history_item() using created basic XMP file
-    support, curves = get_support_curves()
-    append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None)
+        # Test append_rgbcurve_history_item() using created basic XMP file
+        support, curves = get_support_curves()
+        append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None)
 
     # Verify content of final XMP
     tree = ET.parse(xmp_file)
@@ -152,9 +152,9 @@ def test_append_rgbcurve_history_item():
         xmp_file.unlink()  # Ensure file does not exist before test
     assert not xmp_file.exists()
 
-    pil_img = Image.open("images/adobeRGB.jpg")
-    support, curves = get_support_curves()
-    append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None)
+    with Image.open("images/adobeRGB.jpg") as pil_img:
+        support, curves = get_support_curves()
+        append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None)
 
     # Verify content of final XMP
     tree = ET.parse(xmp_file)
