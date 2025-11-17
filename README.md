@@ -23,7 +23,7 @@ AutoLevels helps you fix these issues by letting you choose sensible target blac
 
 ## Installation
 
-Python 3.9 or later is required. On most Linux distributions, this is already pre-installed. Otherwise, download it from [Python.org](https://www.python.org/downloads/) or install it via your favourite app store. Make sure you mark the checkbox "Add Python executable to PATH". Then, to install AutoLevels, open a shell (cmd on Windows) and execute:
+Python 3.9 or later is required (avoid 3.14 until onnxruntime supports it or [install their nightly build](https://github.com/microsoft/onnxruntime/issues/26547)). On most Linux distributions, this is already pre-installed. Otherwise, download it from [Python.org](https://www.python.org/downloads/) or install it via your favourite app store. Make sure you mark the checkbox "Add Python executable to PATH". Then, to install AutoLevels, open a shell (cmd on Windows) and execute:
 
 ```bash
 pip install autolevels
