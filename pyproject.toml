@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "autolevels"
-version = "1.3.2"
+version = "1.3.3"
 description = "A tool for automatic photo enhancement using curve corrections."
 readme = "README.md"
 authors = [{name = "Marius Wanko", email = "marius.wanko@gmail.com"}]

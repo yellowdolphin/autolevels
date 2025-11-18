@@ -1,6 +1,11 @@
 # Changelog
+### v1.3.3
+Release date: 2025-11-18
+- Return after failed singe file processing
+- Improve callback error messages
+
 ### v1.3.2
-Release date:
+Release date: 2025-11-17
 - Support Python 3.14
 - Fix UTF-8 file names on Windows
 
