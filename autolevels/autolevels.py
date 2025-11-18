@@ -706,7 +706,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         if (images is None) and not fn.exists():
             print(f"Error: {fn} not found - skipping")
             if callback is not None:
-                callback(str(fn), False, f'Error: {fn} not found - skipping')
+                callback(str(fn), False, f'not found - skipping')
             continue
 
         # Decide output file name
@@ -734,7 +734,12 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         except Exception as e:
             print(f'Error: skipping {fn}, {e}')
             if callback is not None:
-                callback(str(fn), False, f'Error: broken or unsupported image format (skipping) {fn}')
+                callback(str(fn), False, f'unsupported or corrupt image format - skipping')
+            if len(fns) == 1:
+                # Return if this was the only file to process and it failed.
+                if 'pil_img' in locals():
+                    pil_img.close()
+                return f'Unsupported or corrupt image format: {fn}'
             continue
 
         # Open/decode image with cv2 to get actual pixel array
