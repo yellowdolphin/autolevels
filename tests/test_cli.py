@@ -144,12 +144,12 @@ def test_maxblack_minwhite_options(simulate, tmp_path):
     result = run_autolevels(f'{simulate} --outdir {tmp_path} --max-blackshift 10 --maxblack 100 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'black point: [111  97 115] -> [101  87 105]' in result.stdout
-    assert output_image_path.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)  # max-blackshift applies to all/no channel
     output_image_path.unlink(missing_ok=True)
     result = run_autolevels(f'{simulate} --outdir {tmp_path} --max-blackshift 10 --maxblack 120 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert 'black point: [111  97 115] -> [14 14 14]' in result.stdout
-    assert output_image_path.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)   # max-blackshift applies only beyond maxblack
     output_image_path.unlink(missing_ok=True)
 
     result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 --minwhite 255 -- {TEST_IMAGE}')
@@ -165,11 +165,11 @@ def test_maxblack_minwhite_options(simulate, tmp_path):
     result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 --minwhite 200 --max-whiteshift 0 -- {TEST_IMAGE}')
     assert result.returncode == 0
     assert ('white point: [254 251 248] -> [254 251 248]' in result.stdout) or ('white point:' not in result.stdout)
-    assert output_image_path.exists() != bool(simulate)
+    assert output_image_path.exists() != bool(simulate)   # max-whiteshift always applies
     output_image_path.unlink(missing_ok=True)
     result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 --minwhite 255 --max-whiteshift 255 -- {TEST_IMAGE}')
     assert result.returncode == 0
-    assert 'white point: [254 251 248] -> [255 252 249]' in result.stdout
+    assert 'white point: [254 251 248] -> [255 252 249]' in result.stdout  # preserve hue, saturation
     assert output_image_path.exists() != bool(simulate)
     output_image_path.unlink(missing_ok=True)
     result = run_autolevels(f'{simulate} --outdir {tmp_path} --whitepoint 255 --minwhite 200 --max-whiteshift 255 -- {TEST_IMAGE}')
