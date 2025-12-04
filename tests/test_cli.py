@@ -121,6 +121,22 @@ def test_blackclip_whiteclip_options(simulate, tmp_path):
         assert 'high black point: [127 110 129]' in result.stdout
 
 
+def test_blackclip_whiteclip_edge_cases(tmp_path):
+    """Test high --blackclip and --whiteclip."""
+    for mode in ['hist', 'perceptive']:
+        result = run_autolevels(f'--simulate --outdir {tmp_path} --blackpoint 0 --whitepoint 255 '
+                                '--blackclip 1 --whiteclip 1 '
+                                '--maxblack 255 --minwhite 0 '
+                                f'--max-blackshift 255 --max-whiteshift 255 --mode {mode} -- {TEST_IMAGE}')
+        output_image_path = tmp_path / (Path(TEST_IMAGE).stem + '_al.jpg')
+        print("tested mode:", mode)
+        print("stdout:", result.stdout)
+        assert result.returncode == 0
+        assert output_image_path.exists() is False
+        assert 'black point: [255 255 255] -> [0 0 0]' in result.stdout
+        assert 'white point: [0 0 0] -> [255 255 255]' in result.stdout
+
+
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_maxblack_minwhite_options(simulate, tmp_path):
     """Test --maxblack and --minwhite options with L and RGB values."""
