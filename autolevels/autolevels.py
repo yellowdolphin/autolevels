@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.3.3'
+__version__ = '1.3.4'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -359,10 +359,13 @@ def get_channel_cutoff(hist, thresh, upper=False, norm=None):
     limit = n_total * thresh
     accsum = 0
     _range = range(n_bins - 1, -1, -1) if upper else range(n_bins)
+
     for bin in _range:
         accsum += hist[bin]
         if accsum > limit:
             return bin
+    else:
+        return 0 if upper else n_bins - 1
 
 
 def get_blackpoint_whitepoint(array, maxvalue, mode, pixel_black, pixel_white):
@@ -861,7 +864,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             elif arg.whitepoint:
                 target_white = np.minimum(target_white, whitepoint + max_whiteshift)  # stay below max_whiteshift in any case
 
-            # Set black point to min(target_black, blackpoint).
+            # Set black point to min(target_black, blackpoint)
             target_black = np.minimum(target_black, blackpoint)
 
             # Set white point to max(target_white, whitepoint) or preserve it.
@@ -881,7 +884,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             white = 255 * np.power(target_white / 255, 1 / gamma)
 
             shift = (blackpoint - black) * white / (white - black)
-            stretch_factor = white / (whitepoint - shift)
+            stretch_factor = white / np.clip(whitepoint - shift, 0, None)  # inf handled gracefully
 
             array = array.astype(np.float32)
             array = (array - shift * (maxvalue / 255)) * stretch_factor
@@ -890,7 +893,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 channels = [name for name, s in zip('RGB', shift) if s < 0]
                 print(f'{fn} WARNING: lower black point or increase gamma for channel(s)', *channels)
 
-            array /= maxvalue  # range (0, 1)
+            array = np.clip(array / maxvalue, 0, 1)
 
         # Adjust saturation before gamma (deprecated)
         if (saturation != 1 and arg.saturation_before_gamma and not arg.saturation_first):

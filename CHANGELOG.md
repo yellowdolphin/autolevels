@@ -1,4 +1,8 @@
 # Changelog
+### v1.3.4
+Release date: 2025-12-04
+- Fix "None < int", handle large whiteclip
+
 ### v1.3.3
 Release date: 2025-11-18
 - Return after failed singe file processing
