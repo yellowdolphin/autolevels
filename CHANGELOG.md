@@ -1,4 +1,8 @@
 # Changelog
+### v1.4.0
+Release date:
+- Always append missing file extension
+
 ### v1.3.4
 Release date: 2025-12-04
 - Fix "None < int", handle large whiteclip

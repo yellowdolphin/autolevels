@@ -727,6 +727,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 suf = arg.outsuffix
             else:
                 suf = arg.outsuffix or f'_al{ext}'
+            if '.' not in suf:
+                suf += ext  # add missing extension
             out_fn = (outdir or fn.parent) / f'{stem}{suf}'
         # TODO: check out_fn exists, add option -f to overwrite
 
