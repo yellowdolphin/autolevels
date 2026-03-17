@@ -69,11 +69,28 @@ iop_order_list['5.2'] = (
     'monochrome,0,grain,0,soften,0,splittoning,0,vignette,0,colorreconstruct,0,'
     'finalscale,0,colorout,0,clahe,0,overexposed,0,rawoverexposed,0,dither,0,borders,0,'
     'watermark,0,gamma,0')
+# new in 5.4: agx
+iop_order_list['5.4'] = (
+    'rawprepare,0,invert,0,temperature,0,rasterfile,0,'
+    'highlights,0,cacorrect,0,hotpixels,0,rawdenoise,0,demosaic,0,rgbcurve,1,colorin,0,'
+    'denoiseprofile,0,bilateral,0,rotatepixels,0,scalepixels,0,lens,0,cacorrectrgb,0,'
+    'hazeremoval,0,ashift,0,flip,0,enlargecanvas,0,overlay,0,clipping,0,liquify,0,'
+    'spots,0,retouch,0,exposure,0,mask_manager,0,tonemap,0,toneequal,0,crop,0,'
+    'graduatednd,0,profile_gamma,0,equalizer,0,channelmixerrgb,0,diffuse,0,censorize,0'
+    ',negadoctor,0,blurs,0,primaries,0,nlmeans,0,colorchecker,0,defringe,0,atrous,0,'
+    'lowpass,0,highpass,0,sharpen,0,colortransfer,0,colormapping,0,channelmixer,0,'
+    'basicadj,0,colorbalance,0,colorequal,0,colorbalancergb,0,rgbcurve,0,rgblevels,0,'
+    'basecurve,0,filmic,0,sigmoid,0,agx,0,filmicrgb,0,lut3d,0,colisa,0,tonecurve,0,levels,0,'
+    'shadhi,0,zonesystem,0,globaltonemap,0,relight,0,bilat,0,colorcorrection,0,'
+    'colorcontrast,0,velvia,0,vibrance,0,colorzones,0,bloom,0,colorize,0,lowlight,0,'
+    'monochrome,0,grain,0,soften,0,splittoning,0,vignette,0,colorreconstruct,0,'
+    'finalscale,0,colorout,0,clahe,0,overexposed,0,rawoverexposed,0,dither,0,borders,0,'
+    'watermark,0,gamma,0')
 
 
 def get_iop_order_list_version(export_version):
     """Get the iop_order_list version for the given darktable version (export_version)."""
-    latest_version = '5.2'
+    latest_version = '5.4'
     assert latest_version in iop_order_list, f'ERROR: invalid latest_version {latest_version}'
     if export_version is None:
         print('Warning: no darktable version specified, using latest iop_order_list')
@@ -92,6 +109,8 @@ def get_iop_order_list_version(export_version):
         return '4.8'
     if major_version == 5 and minor_version < 2:
         return '5.0'
+    if major_version == 5 and minor_version < 4:
+        return '5.2'
 
     return latest_version
 

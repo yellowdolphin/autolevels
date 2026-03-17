@@ -92,6 +92,7 @@ def test_fit_rgb_curves_linear():
 
 def test_create_basic_xmp_writes_file(tmp_path):
     xmp_file = tmp_path / "test.xmp"
+
     with Image.open("images/lübeck.jpg") as pil_img:
         create_basic_xmp(xmp_file, pil_img)
 
@@ -133,7 +134,19 @@ def test_create_basic_xmp_writes_file(tmp_path):
     missing, rgbcurve_num, history_end = check_missing(xmp_file)
     assert len(missing) == 0
     assert description.get('{http://darktable.sf.net/}history_basic_hash') == '33e4711b8f6644f5f8c2a164fa3f94cd'
-    assert description.get('{http://darktable.sf.net/}history_current_hash') == '6cbed05a9150be22123901a023a7ca8c'  # hash from darktable
+    try:
+        # test current_hash for latest darktable version
+        #assert description.get('{http://darktable.sf.net/}history_current_hash') == 'd06eaf8dbebdf58471664e35460cef9a'  # hash from darktable 4.8
+        #assert description.get('{http://darktable.sf.net/}history_current_hash') == '6cbed05a9150be22123901a023a7ca8c'  # hash from darktable 5.2
+        assert description.get('{http://darktable.sf.net/}history_current_hash') == '962f41dc722c7e52a3b43d5a5b9c9f92'  # hash from darktable 5.4
+    except AssertionError:
+        from shutil import copy
+        copy(xmp_file, 'wrong_current_hash.xmp')
+        print(f"Copied xmp file with wrong current_hash for latest version to {'wrong_current_hash.xmp'} for debugging")
+        print("To get current_hash from a new darktable version, remove the hash from this file and copy it to lübeck.jpg.xmp.")
+        print("Then delete the .config/darktable folder, launch the new darktable version and import lübeck.jpg.")
+        print("Then update the above assert with the generated current_hash value.")
+        raise
 
     xmp_file.unlink()  # Clean up after test
 
