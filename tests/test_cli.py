@@ -367,8 +367,21 @@ def test_icc_option(simulate, tmp_path):
         output_image_path = outdir / (Path(fn).stem + '_al.jpg')
         output_image_path.unlink(missing_ok=True)
         result = run_autolevels(f'{simulate} --outdir {outdir} --outsuffix _al.jpg --icc-profile {ICC_PROFILE} -- {fn}')
+        print(result.stdout)
+        print(result.stderr)
         assert result.returncode == 0
         assert output_image_path.exists() != bool(simulate)
+        if not simulate:
+            with exiftool.ExifToolHelper() as et:
+                # first check that there was no ICC profile in the source image
+                meta_src = read_metadata_tags(et, fn)
+                profile_src = get_metadata_value(meta_src, group="ICC_Profile", tag="ProfileDescription")
+                assert profile_src is None, f"Expected no ICC profile in source image {fn}, got '{profile_src}'"
+
+                # check sRGB profile was written to output image
+                metadata = read_metadata_tags(et, output_image_path)
+                profile = get_metadata_value(metadata, group="ICC_Profile", tag="ProfileDescription")
+                assert profile.startswith("sRGB"), f"Expected Profile Description 'sRGB', got '{profile}'"
         output_image_path.unlink(missing_ok=True)
 
 

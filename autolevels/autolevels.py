@@ -647,7 +647,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         if not icc_file.exists():
             return f'Error: file not found: {icc_file}'
         icc_profile = ImageCms.getOpenProfile(str(icc_file))
-        sRGB_profile = ImageCms.createProfile('sRGB')
+        srgb_profile = ImageCms.createProfile('sRGB')
 
     # Input file names
     path = Path(arg.folder)
@@ -757,7 +757,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         if arg.icc_profile and arg.reset_icc:
             # Convert from sRGB to ICC profile
             try:
-                array = np.array(ImageCms.profileToProfile(pil_img, sRGB_profile, icc_profile))
+                array = np.array(ImageCms.profileToProfile(pil_img, srgb_profile, icc_profile))
             except ImageCms.PyCMSError as e:
                 print(e, "ICC probably has no B2A")
                 pil_img.close()
@@ -928,7 +928,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
             # Convert color space from ICC profile to sRGB
             if arg.icc_profile:
-                img = ImageCms.profileToProfile(img, icc_profile, sRGB_profile)
+                img = ImageCms.profileToProfile(img, icc_profile, srgb_profile)
 
             # Merge with alpha (RGBA images only)
             if img_alpha is not None:
@@ -957,7 +957,11 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             elif out_format == 'TIFF':
                 # Keep input image compression if available
                 kwargs['compression'] = img.info.get('compression', 'raw')
-            if 'icc_profile' in img.info and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
+            if arg.icc_profile and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
+                # Embed ICC profile if known
+                kwargs['icc_profile'] = ImageCms.ImageCmsProfile(srgb_profile).tobytes()
+            elif 'icc_profile' in img.info and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
+                # Keep embedded ICC profile unless changed
                 kwargs['icc_profile'] = img.info.get('icc_profile')
 
             # Make reproducible, leave CLI args in JPEG comment
