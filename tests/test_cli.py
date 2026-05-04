@@ -1,11 +1,13 @@
+import shutil
 import subprocess
 from autolevels.export import iop_order_list
 import pytest
 from pathlib import Path
-from PIL import Image, ImageCms
+from typing import Any
+from PIL import ImageCms
 import numpy as np
 import cv2
-import piexif
+import exiftool
 
 
 # Define path to the test image
@@ -31,6 +33,41 @@ PNG_IMAGE = "images/48bit_rgb.png"
 TIFF_IMAGE = "images/48bit_rgb.tiff"
 cv2.imwrite(PNG_IMAGE, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
 cv2.imwrite(TIFF_IMAGE, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
+
+# Images with ICC and MakerNote
+JPEG_WITH_ICC_MAKERNOTE = "images/adobeRGB.jpg"
+TIFF_WITH_ICC_MAKERNOTE = "images/adobeRGB.tif"
+PNG_WITH_ICC_MAKERNOTE = "images/adobeRGB.png"
+
+
+def write_metadata_tags(et: exiftool.ExifToolHelper, path: Path, groups: dict[str, tuple[str, str]]) -> None:
+    """Inject one tag per metadata group into *path* (overwrites in place)."""
+    payload = {tag: value for group, (tag, value) in groups.items()
+               if group not in {"MakerNotes", "ICC"}}
+    assert path.exists(), f"Path {path} does not exist"
+    et.set_tags(str(path), payload, params=["-overwrite_original"])
+
+
+def read_metadata_tags(et: exiftool.ExifToolHelper, path: Path) -> dict[str, Any]:
+    """
+    Return the single-file metadata dict for *path*.
+
+    Raise an error if *path* does not exist.
+    """
+    if not Path(path).exists():
+        raise FileNotFoundError(f"read_metadata_tags: path not found: {path}")
+    return et.get_metadata(str(path))[0]
+
+
+def get_metadata_value(meta: dict[str, Any], group: str, tag: str) -> Any:
+    """
+    Retrieve a tag from exiftool's metadata dict.
+
+    ExifToolHelper may key tags as "Group:Name" *or* just "Name" depending
+    on the -G flag usage, so we try both forms.
+    """
+    value = meta.get(f"{group}:{tag}")
+    return meta.get(tag) if value is None else value
 
 
 def run_autolevels(args):
@@ -335,40 +372,81 @@ def test_icc_option(simulate, tmp_path):
         output_image_path.unlink(missing_ok=True)
 
 
-@pytest.mark.parametrize("simulate", ['--simulate', ''])
-def test_piexif(simulate, tmp_path):
-    """Test transferring EXIF data between JPEG images."""
-    tag, value = piexif.ExifIFD.FNumber, (56, 10)
-    exif_dict = {"Exif": {tag: value}}
-    exif_bytes = piexif.dump(exif_dict)
-    fn = tmp_path / Path(TEST_IMAGE).name
-    with Image.open(TIFF_IMAGE) as img:
-        img.save(fn, exif=exif_bytes)
+def test_exiftool(tmp_path):
+    """Test transferring metadata data between images.
 
-    outdir = tmp_path
-    output_image_path = outdir / (Path(fn).stem + '_al.jpg')
-    output_image_path.unlink(missing_ok=True)
-    result = run_autolevels(f'{simulate} --outdir {outdir} --outsuffix _al.jpg -- {fn}')
-    assert result.returncode == 0
-    assert output_image_path.exists() != bool(simulate)
-    if not bool(simulate):
-        # test EXIF has been transferred
-        with Image.open(output_image_path) as img:
-            exif_dict_out = img._getexif()
-        assert exif_dict is not None, 'no EXIF'
-        assert exif_dict_out[tag] == 5.6, f'wrong EXIF value: {exif_dict_out[tag]}'
-    image_with_exif = Path(output_image_path)
+    Verifies that autolevels transfers every metadata group
+    (EXIF, EXIF/MakerNote, ICC_Profile, IPTC, XMP) from src → dst
+    for JPEG, PNG, and TIFF source files.
+    """
+    _GROUPS = {
+        "IPTC":       ("Keywords",                       ["cat1", "cat2"]),
+        "EXIF":       ("YResolution",                    4800),
+        "MakerNotes": ("MakerNotes:FocalLength",         17),
+        "ICC":        ("ICC_Profile:ProfileDescription", "Adobe RGB (1998)"),
+        "XMP":        ("Subject",                        "AutolevelsTestXMP"),
+    }
+    formats = [
+        ("JPEG", ".jpg", JPEG_WITH_ICC_MAKERNOTE),
+        ("PNG",  ".png", PNG_WITH_ICC_MAKERNOTE),
+        ("TIFF", ".tif", TIFF_WITH_ICC_MAKERNOTE),
+    ]
+    failures = []
 
-    for fn, outsuffix in ((image_with_exif, '_al.tif'), (PNG_IMAGE, '_al.jpg')):
-        # test: no error if EXIF is unsupported
-        outdir = tmp_path
-        output_image_path = outdir / (Path(fn).stem + outsuffix)
-        output_image_path.unlink(missing_ok=True)
-        print(f"{simulate} --outdir {outdir} --outsuffix {outsuffix} -- {fn}")
-        result = run_autolevels(f'{simulate} --outdir {outdir} --outsuffix {outsuffix} -- {fn}')
-        assert result.returncode == 0
-        assert output_image_path.exists() != bool(simulate), result.stdout + result.stderr
-        output_image_path.unlink(missing_ok=True)
+    with exiftool.ExifToolHelper() as et:
+
+        for fmt_label, suffix, fn in formats:
+
+            for outsuffix in ['.jpg', '.tif', '.png']:
+
+                src = tmp_path / f"src{suffix}"
+                dst = tmp_path / f"dst{outsuffix}"
+
+                # Copy source file
+                shutil.copy(fn, src)
+
+                # Inject metadata into source
+                write_metadata_tags(et, src, _GROUPS)
+
+                # Run the function under test
+                result = run_autolevels(f'--folder {tmp_path} --outdir {tmp_path} --prefix src --outprefix dst '
+                                        f'--outsuffix {outsuffix} -- {suffix}')
+                assert result.returncode == 0, result.stderr
+                assert dst.exists(), f"[{fmt_label}] failed produce {dst}\n{result.stdout}"
+
+                # Read dst metadata and verify
+                dst_meta = read_metadata_tags(et, dst)
+                src_meta = read_metadata_tags(et, src)
+                print(result.stdout)
+
+                for group, (tag, value) in _GROUPS.items():
+                    expected = str(value)  # get_tags, get_metadata return string values
+                    actual = get_metadata_value(dst_meta, group, tag)
+
+                    if actual is None:
+                        failures.append(
+                            f"[{fmt_label}] group={group!r}  tag={tag!r}  "
+                            f"→ MISSING from {dst.name}"
+                        )
+                        continue
+
+                    if group in {"MakerNote"}:
+                        # binary blobs may alter encoding on round-trip;
+                        # confirming presence is sufficient.
+                        continue
+
+                    actual_str = str(actual).strip()
+                    if actual_str != expected:
+                        failures.append(
+                            f"[{fmt_label}] group={group!r}  tag={tag!r}  "
+                            f"expected={expected!r}  got={actual_str!r}"
+                        )
+            dst.unlink(missing_ok=True)
+
+    assert not failures, (
+        f"{len(failures)} metadata round-trip failure(s):\n"
+        + "\n".join(f"  • {f}" for f in failures)
+    )
 
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])

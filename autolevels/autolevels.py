@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.3.4'
+__version__ = '1.4.0'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -11,7 +11,6 @@ import numpy as np
 from PIL import Image, ImageFilter, ImageCms
 
 import cv2
-import piexif
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
@@ -145,6 +144,9 @@ def get_parser():
                                 'The latter must be the output of a compatible program version. '
                                 'Example: autolevels --reproduce processed_image.jpg '
                                 'other_images/*.jpg'))
+    parser.add_argument(
+        '--exiftool', default=None, type=str, help=(
+                                'Path to exiftool executable. If not provided, will try to find it in PATH.'))
     parser.add_argument(
         '--icc-profile', '--icc', default=None, type=str, help=(
                                 'Specify ICC file for input image(s). If provided, color space will be '
@@ -281,8 +283,7 @@ def imread_unicode(fn, flags=cv2.COLOR_BGR2RGB, bytes=None):
         bytes (bytes, optional): Bytes object with pixel data. Default: None
 
     Returns:
-        np.ndarray: Decoded image array
-        or str: Error message
+        np.ndarray: Decoded image array or str: Error message
 
     Handles all known errors, supports 16-bit images.
     """
@@ -300,6 +301,7 @@ def imread_unicode(fn, flags=cv2.COLOR_BGR2RGB, bytes=None):
 
     # Decode image and convert to RGB
     array = cv2.imdecode(array, cv2.IMREAD_UNCHANGED)
+
     if array is None:
         return f"cv2 could not decode {fn}"
     try:
@@ -627,6 +629,10 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         arg.export = arg.export[0]
         if arg.export not in supported_exports:
             return f'Error: invalid export {arg.export}, must be one of {supported_exports}'
+    if not (arg.outsuffix and arg.outsuffix.endswith('.xmp')):
+        from exiftool import ExifToolHelper
+        import shutil
+        exiftool_path = arg.exiftool or shutil.which('exiftool')
     if arg.model:
         for fn in arg.model:
             if not Path(fn).exists():
@@ -953,26 +959,6 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 kwargs['compression'] = img.info.get('compression', 'raw')
             if 'icc_profile' in img.info and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
                 kwargs['icc_profile'] = img.info.get('icc_profile')
-            if 'dpi' in img.info and out_format in {'JPEG', 'TIFF', 'PNG'}:
-                kwargs['dpi'] = tuple(round(x) for x in img.info['dpi'])
-            if 'exif' in pil_img.info and out_format in {'WEBP', 'PNG'}:
-                kwargs['exif'] = pil_img.getexif()
-            if 'exif' in pil_img.info and out_format in {'TIFF'} and pil_img.format != 'TIFF':
-                # For TIFF -> TIFF processing, EXIF data is preserved without any kwarg.
-                # For X -> TIFF, kwarg exif works only with a TIFF-style IFD, not img.getexif().
-                from PIL.TiffImagePlugin import ImageFileDirectory_v2
-
-                ifd = ImageFileDirectory_v2()
-                for tag_id, value in pil_img.getexif().items():
-                    try:
-                        ifd[tag_id] = value
-                    except Exception as e:
-                        # print(f"Skipping tag {tag_id}: {e}")
-                        pass
-                if len(ifd) > 0:
-                    kwargs['tiffinfo'] = ifd
-            if 'xmp' in pil_img.info and out_format in {'WEBP'}:
-                kwargs['xmp'] = pil_img.info.get('xmp')
 
             # Make reproducible, leave CLI args in JPEG comment
             if getattr(arg, 'cli_params', None):
@@ -999,11 +985,15 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 pil_img.close()
                 return out_fn.getvalue()
 
-            # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
-            # Hence, this is the only way to fully preserve the entire EXIF:
-            piexif_supported = {'.jpg', '.jpeg'}
-            if 'exif' in pil_img.info and (out_fn.suffix.lower() in piexif_supported) and images is None:
-                piexif.transplant(str(fn), str(out_fn))
+        if images is None:
+            if exiftool_path:
+                with ExifToolHelper(executable=exiftool_path) as et:
+                    try:
+                        et.execute('-TagsFromFile', str(fn), '-all:all', '-icc_profile<icc_profile', '-overwrite_original', str(out_fn))
+                    except Exception as e:
+                        print(f"exiftool error: {e}")
+            else:
+                print("exiftool not found, metadata is not preserved.")
 
         # Clean up
         pil_img.close()
