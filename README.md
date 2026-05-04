@@ -18,7 +18,7 @@ AutoLevels helps you fix these issues by letting you choose sensible target blac
 - Support for 16/48-bit images (TIFF, PNG)
 - Apply ICC color profiles *after* corrections
 - Flexible definition of input/output files (glob pattern, prefix/suffix, Python f-string)
-- Preserves compression quality and metadata (EXIF, ICC-profile)
+- Preserves compression quality and metadata (EXIF, IPTC, XMP, ICC-profile)
 - Free Open Source Software (GPLv3)
 
 ## Installation
@@ -50,6 +50,14 @@ and specify the downloaded .onnx file using the `--model` option:
 ```bash
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx -- example.jpg
 ```
+
+To preserve metadata whenever possible, [ExifTool](https://exiftool.org/) must be installed. For Linux, the easiest way is via your package manager, for example (Ubuntu/Debian):
+
+```bash
+sudo apt-get install libimage-exiftool-perl
+```
+
+To install ExifTool on Windows or MacOS, download the zip or pkg file from [https://exiftool.org/](https://exiftool.org/) and follow the installation instructions. Make sure, the executable is added to your PATH.
 
 ### Windows 10
 
