@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image, ImageFilter, ImageCms
 
 import cv2
+from exiftool import ExifToolHelper
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
@@ -343,6 +344,40 @@ def imwrite_unicode(path, array, default_ext='.jpeg', params=None):
     return True
 
 
+def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path):
+    """
+    Transfer metadata from input file to output file using exiftool.
+
+    Args:
+        fn (str | Path): Input file path
+        out_fn (Path): Output file path
+        out_format (str): Output file format
+        pil_img (PIL.Image): PIL image object
+        exiftool_path (str | Path): Path to exiftool executable
+
+    Returns:
+        None
+    """
+    if not exiftool_path:
+        print("exiftool not found, metadata is not preserved.")
+        return
+
+    if out_format == 'TIFF' and kwargs.get('compression', '') == 'jpeg':
+        # Injecting metadata to TIFF with JPEG compression is unsafe
+        from autolevels.tiff_processor import exiftool_safe_transfer
+        result = exiftool_safe_transfer(fn, out_fn, exiftool_path)
+        if result is False:
+            print("exiftool could not transfer all metadata.")
+        return
+
+    exiftool_args = ['-TagsFromFile', str(fn), '-all:all', '-icc_profile<icc_profile', str(out_fn)]
+    with ExifToolHelper(executable=exiftool_path) as et:
+        try:
+            et.execute(*[a.encode() for a in exiftool_args])
+        except Exception as e:
+            print(f"exiftool error: {e}")
+
+
 def get_channel_cutoff(hist, thresh, upper=False, norm=None):
     """Return `hist` bin where accumulated count exceeds fraction of `thresh`.
 
@@ -532,10 +567,16 @@ def get_out_format(filename, pil_img):
 
 
 def estimate_jpeg_quality(pil_img):
-    """Infer quality from qantization table if found, else return default quality."""
-    if not hasattr(pil_img, 'quantization') or pil_img.quantization is None:
+    """Infer quality from qantization table if found, else return default quality.
+
+    pil_img: PIL Image or qtables (dict)
+    """
+    if isinstance(pil_img, dict):
+        qtable = pil_img[0]
+    elif hasattr(pil_img, 'quantization') and pil_img.quantization is not None:
+        qtable = pil_img.quantization[0]
+    else:
         return DEFAULT_QUALITY
-    qtable = pil_img.quantization[0]
     max_q = 100
     m = 1.15
     return round(max_q - np.mean(qtable) / m)
@@ -629,7 +670,6 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         if arg.export not in supported_exports:
             return f'Error: invalid export {arg.export}, must be one of {supported_exports}'
     if not (arg.outsuffix and arg.outsuffix.endswith('.xmp')):
-        from exiftool import ExifToolHelper
         import shutil
         exiftool_path = arg.exiftool or shutil.which('exiftool')
     if arg.model:
@@ -638,7 +678,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 return f'Error: Specified model file could not be found: {fn}'
     else:
         if arg.outsuffix and arg.outsuffix.endswith('.xmp'):
-            return 'Error: cannot export to darktable XMP without a model'
+            return 'Error: cannot export curves to darktable XMP without a model'
         if arg.export == 'darktable':
             print('Warning: ignoring option --export darktable, no model specified')
     if arg.icc_profile:
@@ -751,6 +791,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     pil_img.close()
                 return f'Unsupported or corrupt image format: {fn}'
             continue
+        out_format = get_out_format(out_fn, pil_img)
 
         # Open/decode image with cv2 to get actual pixel array
         if arg.icc_profile and arg.reset_icc:
@@ -917,6 +958,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             L = grayscale(array)
             array = blend(array, L, saturation)
 
+        kwargs = {}  # TODO: allow user to set save options, fill kwargs accordingly for cv2/PIL
         if out_48bit:
             array = (array * 65535).round().clip(0, 65535).astype('uint16')
             imwrite_unicode(out_fn, array, default_ext='.png')
@@ -935,12 +977,10 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 img = Image.merge('RGBA', [*img.split(), img_alpha])
 
             # Update info attribute (PIL.Image always has one) and transfer to new image
-            pil_img.info.update(img.info)
-            setattr(img, 'info', pil_img.info)
+            #pil_img.info.update(img.info)
+            #setattr(img, 'info', pil_img.info)
 
             # Configure save options
-            kwargs = {}
-            out_format = get_out_format(out_fn, img)
             if out_format in {'JPEG'}:
                 # Preserve JPEG quality
                 from PIL import JpegImagePlugin
@@ -948,10 +988,12 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     kwargs['subsampling'] = JpegImagePlugin.get_sampling(pil_img)
                     kwargs['qtables'] = pil_img.quantization
                 elif pil_img.format == 'TIFF' and pil_img.info.get('compression', '') == 'jpeg':
+                    # qtables from TIFF are for RGB, not YCbCr, just keep quality-level
                     from autolevels.tiff_processor import extract_jpeg_info_from_tiff
                     qtables, subsampling = extract_jpeg_info_from_tiff(pil_img)
+                    quality = estimate_jpeg_quality(qtables)
+                    kwargs['quality'] = 44 + round((quality - 24) * (100 - 44) / (100 - 24))
                     kwargs['subsampling'] = subsampling
-                    kwargs['qtables'] = qtables
                 else:
                     kwargs['quality'] = DEFAULT_QUALITY
                     kwargs['subsampling'] = 2 if pil_img.format in {'AVIF'} else 0
@@ -964,10 +1006,18 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 # Lower quality factor a bit (empirically) to match YCbCr compression quality
                 kwargs['compression'] = 'jpeg'
                 jpeg_quality = estimate_jpeg_quality(pil_img)
-                kwargs['quality'] = max(24, 24 + round((jpeg_quality - 44) * (100 - 24) / (100 - 44)))
+                jpeg_quality = max(24, 24 + round((jpeg_quality - 44) * (100 - 24) / (100 - 44)))
+                print(f"JPEG quality: {jpeg_quality}")
+                kwargs['quality'] = jpeg_quality
             elif out_format == 'TIFF':
-                # Keep input image compression if available
-                kwargs['compression'] = pil_img.info.get('compression', 'raw')
+                # Keep input image compression if available (TIFF -> TIFF)
+                kwargs['compression'] = pil_img.info.get('compression', 'tiff_adobe_deflate')
+                if kwargs['compression'] == 'jpeg':
+                    from autolevels.tiff_processor import extract_jpeg_info_from_tiff
+                    qtables, subsampling = extract_jpeg_info_from_tiff(pil_img)
+                    jpeg_quality = estimate_jpeg_quality(qtables)
+                    print(f"JPEG quality: {jpeg_quality}")
+                    kwargs['quality'] = jpeg_quality
             if arg.icc_profile and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
                 # Embed ICC profile if known
                 kwargs['icc_profile'] = ImageCms.ImageCmsProfile(srgb_profile).tobytes()
@@ -1001,14 +1051,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 return out_fn.getvalue()
 
         if images is None:
-            if exiftool_path:
-                with ExifToolHelper(executable=exiftool_path) as et:
-                    try:
-                        et.execute('-TagsFromFile', str(fn), '-all:all', '-icc_profile<icc_profile', '-overwrite_original', str(out_fn))
-                    except Exception as e:
-                        print(f"exiftool error: {e}")
-            else:
-                print("exiftool not found, metadata is not preserved.")
+            transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path)
 
         # Clean up
         pil_img.close()
