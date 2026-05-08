@@ -1035,7 +1035,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             if return_bytes:
                 out_fn = BytesIO()
                 comment = ''
-                kwargs['format'] = pil_img.format
+                kwargs['format'] = out_format
 
             try:
                 # Let PIL derive file format from extension
