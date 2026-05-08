@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.3.4'
+__version__ = '1.4.0'
 
 from pathlib import Path
 from argparse import ArgumentParser
@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image, ImageFilter, ImageCms
 
 import cv2
-import piexif
+from exiftool import ExifToolHelper
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
@@ -146,6 +146,9 @@ def get_parser():
                                 'Example: autolevels --reproduce processed_image.jpg '
                                 'other_images/*.jpg'))
     parser.add_argument(
+        '--exiftool', default=None, type=str, help=(
+                                'Path to exiftool executable. If not provided, will try to find it in PATH.'))
+    parser.add_argument(
         '--icc-profile', '--icc', default=None, type=str, help=(
                                 'Specify ICC file for input image(s). If provided, color space will be '
                                 'converted to sRGB after all corrections. This feature disables 48-bit output.'))
@@ -272,34 +275,33 @@ def evaluate_fstring(s: str, x):
     return result
 
 
-def imread_unicode(fn, flags=cv2.COLOR_BGR2RGB, bytes=None):
+def imread_unicode(fn, flags=cv2.COLOR_BGR2RGB, src_bytes=None):
     """Unicode-safe cv2.imread replacement.
 
     Args:
         fn (str | Path): File name or Path
         flags (int, optional): OpenCV flags for image decoding. Default: cv2.COLOR_BGR2RGB
-        bytes (bytes, optional): Bytes object with pixel data. Default: None
+        src_bytes (bytes, optional): Bytes object with pixel data. Default: None
 
     Returns:
-        np.ndarray: Decoded image array
-        or str: Error message
+        np.ndarray: Decoded image array or str: Error message
 
     Handles all known errors, supports 16-bit images.
     """
     # The bytes object for decoding is always uint8, regardless of pixel depth
-    if bytes is None:
+    if src_bytes is None:
         try:
-            array = np.frombuffer(Path(fn).read_bytes(), np.uint8)
+            src_bytes = Path(fn).read_bytes()
         except Exception as e:
             return f"Could not read {fn}: {e}"
-    else:
-        array = np.frombuffer(bytes, np.uint8)
+    array = np.frombuffer(src_bytes, np.uint8)
 
     if len(array) == 0:
         return f"{fn} is an empty file, no image data found"
 
     # Decode image and convert to RGB
     array = cv2.imdecode(array, cv2.IMREAD_UNCHANGED)
+
     if array is None:
         return f"cv2 could not decode {fn}"
     try:
@@ -340,6 +342,40 @@ def imwrite_unicode(path, array, default_ext='.jpeg', params=None):
         print(f"Could not write {path}: {e}")
         return False
     return True
+
+
+def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path):
+    """
+    Transfer metadata from input file to output file using exiftool.
+
+    Args:
+        fn (str | Path): Input file path
+        out_fn (Path): Output file path
+        out_format (str): Output file format
+        pil_img (PIL.Image): PIL image object
+        exiftool_path (str | Path): Path to exiftool executable
+
+    Returns:
+        None
+    """
+    if not exiftool_path:
+        print("exiftool not found, metadata is not preserved.")
+        return
+
+    if out_format == 'TIFF' and kwargs.get('compression', '') == 'jpeg':
+        # Injecting metadata to TIFF with JPEG compression is unsafe
+        from autolevels.tiff_processor import exiftool_safe_transfer
+        result = exiftool_safe_transfer(fn, out_fn, exiftool_path)
+        if result is False:
+            print("exiftool could not transfer all metadata.")
+        return
+
+    exiftool_args = ['-TagsFromFile', str(fn), '-all:all', '-icc_profile<icc_profile', str(out_fn)]
+    with ExifToolHelper(executable=exiftool_path) as et:
+        try:
+            et.execute(*[a.encode() for a in exiftool_args])
+        except Exception as e:
+            print(f"exiftool error: {e}")
 
 
 def get_channel_cutoff(hist, thresh, upper=False, norm=None):
@@ -531,10 +567,16 @@ def get_out_format(filename, pil_img):
 
 
 def estimate_jpeg_quality(pil_img):
-    """Infer quality from qantization table if found, else return default quality."""
-    if not hasattr(pil_img, 'quantization') or pil_img.quantization is None:
+    """Infer quality from qantization table if found, else return default quality.
+
+    pil_img: PIL Image or qtables (dict)
+    """
+    if isinstance(pil_img, dict):
+        qtable = pil_img[0]
+    elif hasattr(pil_img, 'quantization') and pil_img.quantization is not None:
+        qtable = pil_img.quantization[0]
+    else:
         return DEFAULT_QUALITY
-    qtable = pil_img.quantization[0]
     max_q = 100
     m = 1.15
     return round(max_q - np.mean(qtable) / m)
@@ -627,13 +669,16 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         arg.export = arg.export[0]
         if arg.export not in supported_exports:
             return f'Error: invalid export {arg.export}, must be one of {supported_exports}'
+    if not (arg.outsuffix and arg.outsuffix.endswith('.xmp')):
+        import shutil
+        exiftool_path = arg.exiftool or shutil.which('exiftool')
     if arg.model:
         for fn in arg.model:
             if not Path(fn).exists():
                 return f'Error: Specified model file could not be found: {fn}'
     else:
         if arg.outsuffix and arg.outsuffix.endswith('.xmp'):
-            return 'Error: cannot export to darktable XMP without a model'
+            return 'Error: cannot export curves to darktable XMP without a model'
         if arg.export == 'darktable':
             print('Warning: ignoring option --export darktable, no model specified')
     if arg.icc_profile:
@@ -641,7 +686,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         if not icc_file.exists():
             return f'Error: file not found: {icc_file}'
         icc_profile = ImageCms.getOpenProfile(str(icc_file))
-        sRGB_profile = ImageCms.createProfile('sRGB')
+        srgb_profile = ImageCms.createProfile('sRGB')
 
     # Input file names
     path = Path(arg.folder)
@@ -746,12 +791,13 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     pil_img.close()
                 return f'Unsupported or corrupt image format: {fn}'
             continue
+        out_format = get_out_format(out_fn, pil_img)
 
         # Open/decode image with cv2 to get actual pixel array
         if arg.icc_profile and arg.reset_icc:
             # Convert from sRGB to ICC profile
             try:
-                array = np.array(ImageCms.profileToProfile(pil_img, sRGB_profile, icc_profile))
+                array = np.array(ImageCms.profileToProfile(pil_img, srgb_profile, icc_profile))
             except ImageCms.PyCMSError as e:
                 print(e, "ICC probably has no B2A")
                 pil_img.close()
@@ -759,7 +805,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         else:
             if images is not None:
                 # Unpack streamlit.UploadedFile for cv2 with unknown bit-depth
-                array = imread_unicode(fn, bytes=BytesIO(images[i]).read())
+                array = imread_unicode(fn, src_bytes=BytesIO(images[i]).read())
             else:
                 array = imread_unicode(fn)
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255
@@ -824,7 +870,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     xmp_file = out_fn
                     skip_image_output = True
                 else:
-                    xmp_file = fn.with_suffix(fn.suffix + '.xmp')
+                    xmp_file = fn.with_name(fn.name + '.xmp')
                     skip_image_output = False
 
                 try:
@@ -912,67 +958,72 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             L = grayscale(array)
             array = blend(array, L, saturation)
 
+        kwargs = {}  # TODO: allow user to set save options, fill kwargs accordingly for cv2/PIL
         if out_48bit:
             array = (array * 65535).round().clip(0, 65535).astype('uint16')
             imwrite_unicode(out_fn, array, default_ext='.png')
         else:
+            # Quantize, continue with PIL Image
             array = (array * 255).round().clip(0, 255).astype('uint8')
-
             img = Image.fromarray(array)
+            del array
 
             # Convert color space from ICC profile to sRGB
             if arg.icc_profile:
-                img = ImageCms.profileToProfile(img, icc_profile, sRGB_profile)
+                img = ImageCms.profileToProfile(img, icc_profile, srgb_profile)
 
             # Merge with alpha (RGBA images only)
             if img_alpha is not None:
                 img = Image.merge('RGBA', [*img.split(), img_alpha])
 
-            # Add attributes required to preserve JPEG quality
-            for attr in 'format layer layers quantization'.split():
-                value = getattr(pil_img, attr, None)
-                if value is not None:
-                    setattr(img, attr, value)
-
             # Update info attribute (PIL.Image always has one) and transfer to new image
-            pil_img.info.update(img.info)
-            setattr(img, 'info', pil_img.info)
+            #pil_img.info.update(img.info)
+            #setattr(img, 'info', pil_img.info)
 
             # Configure save options
-            kwargs = {}
-            out_format = get_out_format(out_fn, img)
             if out_format in {'JPEG'}:
-                kwargs['quality'] = 'keep' if hasattr(img, 'quantization') else DEFAULT_QUALITY
-            elif (img.format == 'JPEG') and out_format in {'TIFF'}:
-                # Try to preserve input image JPEG quality empirically (TIFF files are larger)
+                # Preserve JPEG quality
+                from PIL import JpegImagePlugin
+                if pil_img.format in {'JPEG'}:
+                    kwargs['subsampling'] = JpegImagePlugin.get_sampling(pil_img)
+                    kwargs['qtables'] = pil_img.quantization
+                elif pil_img.format == 'TIFF' and pil_img.info.get('compression', '') == 'jpeg':
+                    # qtables from TIFF are for RGB, not YCbCr, just keep quality-level
+                    from autolevels.tiff_processor import extract_jpeg_info_from_tiff
+                    qtables, subsampling = extract_jpeg_info_from_tiff(pil_img)
+                    quality = estimate_jpeg_quality(qtables)
+                    kwargs['quality'] = 44 + round((quality - 24) * (100 - 44) / (100 - 24))
+                    kwargs['subsampling'] = subsampling
+                else:
+                    kwargs['quality'] = DEFAULT_QUALITY
+                    kwargs['subsampling'] = 2 if pil_img.format in {'AVIF'} else 0
+            elif out_format in {'TIFF'} and pil_img.format == 'JPEG':
+                # Try to preserve visual input image JPEG quality (not file size).
+                # TIFF files with JPEG-compression are larger because
+                # - encode RGB, not YCbCr -> no effective quantization/Huffman coding (2.1×)
+                # - 4:2:0 chroma subsampling (1.2×)
+                # - stripes/overhead (< 1%)
+                # Lower quality factor a bit (empirically) to match YCbCr compression quality
                 kwargs['compression'] = 'jpeg'
-                jpeg_quality = estimate_jpeg_quality(img)
-                kwargs['quality'] = max(24, 24 + round((jpeg_quality - 44) * (100 - 24) / (100 - 44)))
+                jpeg_quality = estimate_jpeg_quality(pil_img)
+                jpeg_quality = max(24, 24 + round((jpeg_quality - 44) * (100 - 24) / (100 - 44)))
+                print(f"JPEG quality: {jpeg_quality}")
+                kwargs['quality'] = jpeg_quality
             elif out_format == 'TIFF':
-                # Keep input image compression if available
-                kwargs['compression'] = img.info.get('compression', 'raw')
-            if 'icc_profile' in img.info and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
-                kwargs['icc_profile'] = img.info.get('icc_profile')
-            if 'dpi' in img.info and out_format in {'JPEG', 'TIFF', 'PNG'}:
-                kwargs['dpi'] = tuple(round(x) for x in img.info['dpi'])
-            if 'exif' in pil_img.info and out_format in {'WEBP', 'PNG'}:
-                kwargs['exif'] = pil_img.getexif()
-            if 'exif' in pil_img.info and out_format in {'TIFF'} and pil_img.format != 'TIFF':
-                # For TIFF -> TIFF processing, EXIF data is preserved without any kwarg.
-                # For X -> TIFF, kwarg exif works only with a TIFF-style IFD, not img.getexif().
-                from PIL.TiffImagePlugin import ImageFileDirectory_v2
-
-                ifd = ImageFileDirectory_v2()
-                for tag_id, value in pil_img.getexif().items():
-                    try:
-                        ifd[tag_id] = value
-                    except Exception as e:
-                        # print(f"Skipping tag {tag_id}: {e}")
-                        pass
-                if len(ifd) > 0:
-                    kwargs['tiffinfo'] = ifd
-            if 'xmp' in pil_img.info and out_format in {'WEBP'}:
-                kwargs['xmp'] = pil_img.info.get('xmp')
+                # Keep input image compression if available (TIFF -> TIFF)
+                kwargs['compression'] = pil_img.info.get('compression', 'tiff_adobe_deflate')
+                if kwargs['compression'] == 'jpeg':
+                    from autolevels.tiff_processor import extract_jpeg_info_from_tiff
+                    qtables, subsampling = extract_jpeg_info_from_tiff(pil_img)
+                    jpeg_quality = estimate_jpeg_quality(qtables)
+                    print(f"JPEG quality: {jpeg_quality}")
+                    kwargs['quality'] = jpeg_quality
+            if arg.icc_profile and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
+                # Embed ICC profile if known
+                kwargs['icc_profile'] = ImageCms.ImageCmsProfile(srgb_profile).tobytes()
+            elif 'icc_profile' in pil_img.info and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
+                # Keep embedded ICC profile unless changed
+                kwargs['icc_profile'] = pil_img.info.get('icc_profile')
 
             # Make reproducible, leave CLI args in JPEG comment
             if getattr(arg, 'cli_params', None):
@@ -984,26 +1035,23 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             if return_bytes:
                 out_fn = BytesIO()
                 comment = ''
-                kwargs['format'] = img.format
+                kwargs['format'] = out_format
 
             try:
                 # Let PIL derive file format from extension
                 img.save(out_fn, comment=comment, optimize=True, **kwargs)
             except ValueError as e:
                 # If that fails, save in original format
-                print(f"{e}, saving in {img.format}.")
-                img.save(out_fn, format=img.format, comment=comment, optimize=True, **kwargs)
+                print(f"{e}, saving in {pil_img.format}.")
+                img.save(out_fn, format=pil_img.format, comment=comment, optimize=True, **kwargs)
 
             if return_bytes:
                 # No EXIF is needed for previews
                 pil_img.close()
                 return out_fn.getvalue()
 
-            # Neither PIL nor piexif correctly decode the (proprietary) MakerNotes IFD.
-            # Hence, this is the only way to fully preserve the entire EXIF:
-            piexif_supported = {'.jpg', '.jpeg'}
-            if 'exif' in pil_img.info and (out_fn.suffix.lower() in piexif_supported) and images is None:
-                piexif.transplant(str(fn), str(out_fn))
+        if images is None:
+            transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path)
 
         # Clean up
         pil_img.close()

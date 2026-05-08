@@ -89,7 +89,15 @@ iop_order_list['5.4'] = (
 
 
 def get_iop_order_list_version(export_version):
-    """Get the iop_order_list version for the given darktable version (export_version)."""
+    """Get the iop_order_list version for the given darktable version (export_version).
+
+    This is not an XMP tag (like iop_order_version) but a darktable release number where
+    the iop_order_list was changed, for example due to newly introduced modules.
+
+    The iop_order_list is only written by darktable once module order is modified by
+    the user. It depends on the processing/auto-apply pixel workflow defaults preferences
+    and on whether the image is RAW or not.
+    """
     latest_version = '5.4'
     assert latest_version in iop_order_list, f'ERROR: invalid latest_version {latest_version}'
     if export_version is None:
@@ -196,8 +204,6 @@ def fit_rgb_curves(curves, max_points=20, max_error=1e-6):
     curves: ndarray shape (3, 256) float32 in [0,1]
     Returns
         list of 3 arrays (one per channel) with variable shapes (N, 2), N <= 20
-        or (return_rmse==True) a list of 3 dicts:
-            {'indices': idx array, 'x': x coords [0..1], 'y': y coords [0..1], 'rmse': float}
     """
     curves = np.asarray(curves, dtype=float)
     assert curves.shape == (3, 256), f"expected shape (3,256), got {curves.shape}"
@@ -222,7 +228,7 @@ def local_name(tag):
 def pack_rgbcurve_params(splines,
                          curve_type: str = "MONOTONE_HERMITE",
                          autoscale_mode: str = "RGB, independent channels",
-                         compensate_middle_grey: bool = False,
+                         compensate_middle_gray: bool = False,
                          preserve_colors: str = "None",
                          compress_mode: str = "only large entries") -> str:
     """
@@ -232,7 +238,7 @@ def pack_rgbcurve_params(splines,
         splines: list of 3 arrays with shapes (N, 2) and N <= 20
         curve_type: One of ("CUBIC_SPLINE", "CENTRIPETAL", "MONOTONE_HERMITE").
         autoscale_mode: One of ("RGB, linked channels", "RGB, independent channels").
-        compensate_middle_grey: Whether to enable middle grey compensation.
+        compensate_middle_gray: Assume sRGB color space for curve points, histogram.
         preserve_colors: One of RGB_NORMS ('None','Luminance','Max','Average','Sum','Norm','Power').
         compress_mode: exif_xmp_encode mode: 'always', 'only large entries', or 'never'.
 
@@ -277,7 +283,7 @@ def pack_rgbcurve_params(splines,
         int(num_nodes[2]),
         int(type_idx), int(type_idx), int(type_idx),  # per-channel curve type
         int(autoscale_idx),
-        int(bool(compensate_middle_grey)),
+        int(bool(compensate_middle_gray)),
         int(preserve_idx),
     ]
 
