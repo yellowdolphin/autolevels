@@ -118,7 +118,7 @@ def test_create_basic_xmp_writes_file(tmp_path):
 
         # Test append_rgbcurve_history_item() using created basic XMP file
         support, curves = get_support_curves()
-        append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None)
+        append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None, export_version='5.2')
 
     # Verify content of final XMP
     tree = ET.parse(xmp_file)
