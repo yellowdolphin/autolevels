@@ -1,4 +1,8 @@
 # Changelog
+### v1.3.6
+Release date: 2026-05-09
+- Don't write "\_original" files
+
 ### v1.3.5
 Release date: 2026-05-09
 - Preserve EXIF/MakerNote, XMP, IPTC metadata whenever possible
