@@ -358,7 +358,7 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path):
     Returns:
         None
     """
-    if not exiftool_path:
+    if not exiftool_path or not Path(exiftool_path).exists():
         print("exiftool not found, metadata is not preserved.")
         return
 
