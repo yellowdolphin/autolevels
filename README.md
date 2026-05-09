@@ -39,7 +39,7 @@ This will also install the following requirements if not found:
 
 - numpy
 - pillow
-- piexif
+- pyexiftools
 - opencv-python
 - h5py
 - onnxruntime

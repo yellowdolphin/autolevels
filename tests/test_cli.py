@@ -454,15 +454,15 @@ def test_exiftool(tmp_path):
                 # Run the function under test
                 result = run_autolevels(f'--folder {tmp_path} --outdir {tmp_path} --prefix src --outprefix dst '
                                         f'--outsuffix {outsuffix} -- {suffix}')
+                print(result.stdout)
                 assert result.returncode == 0, result.stderr
                 assert dst.exists(), f"[{fmt_label}] failed produce {dst}\n{result.stdout}"
                 file_size = dst.stat().st_size
                 assert file_size > 0.5 * src.stat().st_size, f"bad size ({file_size}) for {dst}"
+                assert not dst.with_name(f"{dst.name}_original").exists(), "_original file found"
 
                 # Read dst metadata and verify
                 dst_meta = read_metadata_tags(et, dst)
-                src_meta = read_metadata_tags(et, src)
-                print(result.stdout)
 
                 for group, (tag, value) in _GROUPS.items():
                     expected = str(value)  # get_tags, get_metadata return string values
@@ -518,6 +518,7 @@ def test_format_conversion(tmp_path):
     with exiftool.ExifToolHelper() as et:
         meta = read_metadata_tags(et, output_image_path)
     print(f"Metadata keys: {len(meta)}")
+    assert not output_image_path.with_name(f"{output_image_path.name}_original").exists(), "_original file found"
 
     # TIFF -> TIFF (keep JPEG compression)
     fn = output_image_path
@@ -532,6 +533,7 @@ def test_format_conversion(tmp_path):
     with exiftool.ExifToolHelper() as et:
         meta = read_metadata_tags(et, output_image_path)
     print(f"Metadata keys: {len(meta)}")
+    assert not output_image_path.with_name(f"{output_image_path.name}_original").exists(), "_original file found"
 
     # TIFF (compression "jpeg") -> JPEG
     result = run_autolevels(f'--outdir {tmp_path} --outsuffix .jpg -- {fn}')
@@ -545,6 +547,7 @@ def test_format_conversion(tmp_path):
     with exiftool.ExifToolHelper() as et:
         meta = read_metadata_tags(et, output_image_path)
     print(f"Metadata keys: {len(meta)}")
+    assert not output_image_path.with_name(f"{output_image_path.name}_original").exists(), "_original file found"
 
     # Test final file is still intact
     with Image.open(output_image_path) as img:

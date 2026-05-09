@@ -359,7 +359,7 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path):
         None
     """
     if not exiftool_path or not Path(exiftool_path).exists():
-        print("exiftool not found, metadata is not preserved.")
+        print(f"exiftool not found, metadata is not preserved in {out_fn}.")
         return
 
     if out_format == 'TIFF' and kwargs.get('compression', '') == 'jpeg':
@@ -367,10 +367,10 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path):
         from autolevels.tiff_processor import exiftool_safe_transfer
         result = exiftool_safe_transfer(fn, out_fn, exiftool_path)
         if result is False:
-            print("exiftool could not transfer all metadata.")
+            print(f"exiftool could not transfer all metadata to {out_fn}.")
         return
 
-    exiftool_args = ['-TagsFromFile', str(fn), '-all:all', '-icc_profile<icc_profile', str(out_fn)]
+    exiftool_args = ['-TagsFromFile', str(fn), '-all:all', '-icc_profile<icc_profile', '-overwrite_original', str(out_fn)]
     with ExifToolHelper(executable=exiftool_path) as et:
         try:
             et.execute(*[a.encode() for a in exiftool_args])

@@ -458,6 +458,7 @@ def exiftool_safe_transfer(src, dst, exiftool_path=None):
                                         # but some values and tags are wrong
             '-exif:all', '-iptc:all', '-xmp:all',
             '-icc_profile<icc_profile',  # adds profile if missing/deleted
+            '-overwrite_original',
         ] + [str(tmp)]
 
         with exiftool.ExifTool(executable=exiftool_path) as et:
