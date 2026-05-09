@@ -1,6 +1,6 @@
 # Changelog
-### v1.4.0
-Release date:
+### v1.3.5
+Release date: 2026-05-09
 - Preserve EXIF/MakerNote, XMP, IPTC metadata whenever possible
 - Embed ICC profile whenever known
 - Always append missing file extension
