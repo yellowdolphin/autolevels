@@ -1007,7 +1007,6 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 kwargs['compression'] = 'jpeg'
                 jpeg_quality = estimate_jpeg_quality(pil_img)
                 jpeg_quality = max(24, 24 + round((jpeg_quality - 44) * (100 - 24) / (100 - 44)))
-                print(f"JPEG quality: {jpeg_quality}")
                 kwargs['quality'] = jpeg_quality
             elif out_format == 'TIFF':
                 # Keep input image compression if available (TIFF -> TIFF)
@@ -1016,7 +1015,6 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     from autolevels.tiff_processor import extract_jpeg_info_from_tiff
                     qtables, subsampling = extract_jpeg_info_from_tiff(pil_img)
                     jpeg_quality = estimate_jpeg_quality(qtables)
-                    print(f"JPEG quality: {jpeg_quality}")
                     kwargs['quality'] = jpeg_quality
             if arg.icc_profile and out_format in {'JPEG', 'WEBP', 'PNG', 'TIFF'}:
                 # Embed ICC profile if known
