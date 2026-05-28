@@ -157,7 +157,7 @@ def decode_trc(raw):
         if function_type == 3 and n_params == 5:
             # sRGB-like Gamma function
             g, a, b, c, d = (p / 65536 for p in params)
-            print(f"g: {g}\na: {a}\nb: {b}\nc: {c}\nd: {d}")
+            #print(f"g: {g}\na: {a}\nb: {b}\nc: {c}\nd: {d}")
             return get_gamma_trc(g, a, b, c, d)
 
     raise NotImplementedError(f"cannot decode TRC of type {sig}")
@@ -578,7 +578,7 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
             for i, tag in enumerate(TRC_TAGS[0:3]):
                 trc = input_icc_profile['trcs'][tag][0]
                 array[:, :, i] = trc(array[:, :, i])
-            print("DEBUG: after input TRC:", array.dtype, array.min(), array.mean(), array.max())
+            #print("DEBUG: after input TRC:", array.dtype, array.min(), array.mean(), array.max())
 
     # Input color matrix
     if source_cm is not None:
@@ -735,8 +735,8 @@ def connect_pcs(p, src_pcs, dst_pcs, src_lut_type, dst_lut_type):
 def _normalized_xyz_to_lab(p, src_lut_type, dst_lut_type):
     # 1. Normalised → actual XYZ
     xyz = p * _xyz_norm_scale(src_lut_type)
-    print(f"multiplied XYZ by factor {_xyz_norm_scale(src_lut_type)}")
-    print(f"XYZ range: {xyz.min()} to {xyz.max()}")
+    #print(f"multiplied XYZ by factor {_xyz_norm_scale(src_lut_type)}")
+    #print(f"XYZ range: {xyz.min()} to {xyz.max()}")
 
     # 2. Adapt to D50, apply f()
     f = _f(xyz / D50)                          # (N, 3)
@@ -745,14 +745,14 @@ def _normalized_xyz_to_lab(p, src_lut_type, dst_lut_type):
     L = 116.0 * f[:, 1] - 16.0
     a = 500.0 * (f[:, 0] - f[:, 1])
     b = 200.0 * (f[:, 1] - f[:, 2])
-    print("Lab channels before normalization/clip:")
-    print(f"  L: {L.min()} to {L.max()}")
-    print(f"  a: {a.min()} to {a.max()}")
-    print(f"  b: {b.min()} to {b.max()}")
+    #print("Lab channels before normalization/clip:")
+    #print(f"  L: {L.min()} to {L.max()}")
+    #print(f"  a: {a.min()} to {a.max()}")
+    #print(f"  b: {b.min()} to {b.max()}")
 
     # 4. Lab → normalised
     L_scale = _lab_l_norm_scale(dst_lut_type)
-    print(f"dividing L* by {L_scale}")
+    #print(f"dividing L* by {L_scale}")
     result = np.stack([
         L / L_scale,
         (a + 128.0) / 255.0,
@@ -791,7 +791,7 @@ def _renormalize_pcs(p, pcs, src_lut_type, dst_lut_type):
     else:  # Lab
         result = np.empty_like(p)
         l_scale = _lab_l_norm_scale(src_lut_type) / _lab_l_norm_scale(dst_lut_type)
-        print(f"multiplying L* by {l_scale}")
+        #print(f"multiplying L* by {l_scale}")
         result[:, 0] = p[:, 0] * l_scale
         result[:, 1] = p[:, 1]     # a* encoding is identical across all LUT types
         result[:, 2] = p[:, 2]     # b* encoding is identical across all LUT types
