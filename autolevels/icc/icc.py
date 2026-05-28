@@ -198,7 +198,7 @@ def get_srgb_profile(version, exiftool_path):
 
     gamma_trc = get_gamma_trc()
     profile = {
-        'path': None,
+        'path': resources.files('autolevels.data') / 'sRGB2014.icc',
         'description': 'sRGB',
         'version': '2.0.0',
         'pcs': 'XYZ',
