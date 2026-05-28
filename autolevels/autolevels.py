@@ -726,7 +726,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         icc_file = Path(arg.input_icc_profile)
         if not icc_file.exists():
             return f'Error: file not found: {icc_file}'
-        input_icc_profile = get_icc_profile(icc_file)
+        input_icc_profile = get_icc_profile(icc_file, exiftool_path)
         print(f"DEBUG: input ICC profile from {icc_file}: {input_icc_profile['description']}")
     else:
         input_icc_profile = None  # read from each input file
@@ -734,12 +734,12 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         if arg.output_icc_profile.lower() == 'srgb':
             icc_version = input_icc_profile['version'] if input_icc_profile else '2.0.0'
             print(f"DEBUG: Creating sRGB version {icc_version} as target profile")
-            output_icc_profile = get_srgb_profile(icc_version)
+            output_icc_profile = get_srgb_profile(icc_version, exiftool_path)
         else:
             icc_file = Path(arg.output_icc_profile)
             if not icc_file.exists():
                 return f'Error: file not found: {icc_file}'
-            output_icc_profile = get_icc_profile(icc_file)
+            output_icc_profile = get_icc_profile(icc_file, exiftool_path)
             print(f"DEBUG: output ICC profile from {icc_file}: {output_icc_profile['description']}")
     else:
         output_icc_profile = None  # use input_rgb_profile
@@ -863,10 +863,11 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         # Get ICC profile from input file if no ICC file was provided, fallback: sRGB
         if input_icc_profile is None:
             print("DEBUG: Trying to load ICC profile from input file...")
-        input_icc_profile = input_icc_profile or get_icc_profile(fn)
+        input_icc_profile = input_icc_profile or get_icc_profile(fn, exiftool_path)
         if input_icc_profile is None:
             input_icc_profile = get_srgb_profile(
-                version=output_icc_profile['version'] if output_icc_profile else '2.0.0')
+                version=output_icc_profile['version'] if output_icc_profile else '2.0.0',
+                exiftool_path=exiftool_path)
             print(f"Assuming sRGB: {input_icc_profile['description']}")
 
         # Check conditions for 48-bit output
@@ -921,7 +922,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 free_curve = model(resized)
             elif model_space == 'srgb':
                 icc_version = input_icc_profile['version'] if input_icc_profile else '2.0.0'
-                srgb_profile = get_srgb_profile(icc_version)
+                srgb_profile = get_srgb_profile(icc_version, exiftool_path)
                 resized = resized.astype(np.float32) / maxvalue
                 resized = profile_to_profile(resized, input_icc_profile, srgb_profile)
                 resized = (resized * maxvalue).round().astype(np.uint8 if maxvalue == 255 else np.uint16)
@@ -932,14 +933,14 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             elif model_space == 'trc':
                 if 'srgb_trcs' not in globals():
                     srgb_trcs = None
-                resized, srgb_trcs = convert_to_srgb(resized, input_icc_profile, srgb_trcs)
+                resized, srgb_trcs = convert_to_srgb(resized, input_icc_profile, exiftool_path, srgb_trcs)
                 #Image.fromarray(resized if maxvalue == 255 else (resized * (255 / 65535)).astype(np.uint8)).save('debug.png')
                 #print("DEBUG: wrote model input to debug.png")
                 free_curve = model(resized)
                 free_curve = convert_curve(free_curve, input_icc_profile, srgb_trcs)
             elif model_space == 'gamma':
                 # Infer gamma of input_color_space
-                input_gamma = infer_gamma(input_icc_profile)
+                input_gamma = infer_gamma(input_icc_profile, exiftool_path)
                 resized = resized.astype(np.float32) / maxvalue
                 resized = np.power(resized, input_gamma / 2.2)
                 resized = (resized * maxvalue).round().astype(np.uint8 if maxvalue == 255 else np.uint16)

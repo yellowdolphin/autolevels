@@ -15,7 +15,7 @@ sRGB_CM_V2 = [[0.43607, 0.22249, 0.01392],
 D50 = np.array([0.9642, 1.0, 0.8249])  # ICC D50 white point (XYZ)
 
 
-def get_icc_profile(path):
+def get_icc_profile(path, exittool_path):
     """Read ICC_Profile parameters from image or ICC files
 
     Returns:
@@ -23,7 +23,7 @@ def get_icc_profile(path):
     """
     profile = {}
     trcs = {}
-    with exiftool.ExifTool() as et:
+    with exiftool.ExifTool(executable=exittool_path) as et:
         description = et.execute('-ICC_Profile:ProfileDescription', str(path)).split(':')[-1].strip()
         if not description:
             print(f"DEBUG: No ICC profile found in {path}")
@@ -190,10 +190,11 @@ def get_gamma_trc(g=2.4, a=1/1.055, b=0.055/1.055, c=1/12.92, d=0.04045):
     return fn, inv_fn
 
 
-def get_srgb_profile(version):
+def get_srgb_profile(version, exiftool_path):
     major_version = 2 if version.startswith("2.") else 4
     if major_version == 4:
-        return get_icc_profile(resources.files('autolevels.data') / 'sRGB_v4_ICC_preference.icc')
+        return get_icc_profile(resources.files('autolevels.data') / 'sRGB_v4_ICC_preference.icc',
+                               exiftool_path)
 
     gamma_trc = get_gamma_trc()
     profile = {
@@ -250,7 +251,7 @@ def get_line_color_chart():
     return img
 
 
-def convert_to_srgb(array, input_icc_profile, trcs=None):
+def convert_to_srgb(array, input_icc_profile, exiftool_path, trcs=None):
     """
     Convert pixel array from input ICC profile to sRGB
 
@@ -276,10 +277,10 @@ def convert_to_srgb(array, input_icc_profile, trcs=None):
 
             # DEBUG: save TRCs for input->sRGB conversion
             version = input_icc_profile.get('version', '2.0.0')
-            #print(f"Input profile version: {version}")
+            srgb_profile = get_srgb_profile(version, exiftool_path)
             xs = np.linspace(0, 1, 256)
             xs_rgb = np.tile(xs[:, None, None], (1, 1, 3))  # (256, 1, 3)
-            ys_rgb = profile_to_profile(xs_rgb, input_icc_profile, get_srgb_profile(version)).reshape(256, 3)
+            ys_rgb = profile_to_profile(xs_rgb, input_icc_profile, srgb_profile).reshape(256, 3)
             #np.savez("trcs.npz", xs=xs_rgb, ys=ys_rgb)
             #print("DEBUG: saved input_profile -> sRGB TRCs to trcs.npz")
 
@@ -287,9 +288,10 @@ def convert_to_srgb(array, input_icc_profile, trcs=None):
         if trcs is None:
             # No TRCs found, construct one from converting a linear curve from input profile to sRGB
             version = input_icc_profile.get('version', '2.0.0')
+            srgb_profile = get_srgb_profile(version, exiftool_path)
             xs = np.linspace(0, 1, 256)
             xs_rgb = np.tile(xs[:, None, None], (1, 1, 3))  # (256, 1, 3)
-            ys_rgb = profile_to_profile(xs_rgb, input_icc_profile, get_srgb_profile(version)).reshape(256, 3)
+            ys_rgb = profile_to_profile(xs_rgb, input_icc_profile, srgb_profile).reshape(256, 3)
 
             #np.savez("trcs.npz", xs=xs_rgb, ys=ys_rgb)
             #print("DEBUG: saved input_profile -> sRGB TRCs to trcs.npz")
@@ -323,7 +325,7 @@ def convert_to_srgb(array, input_icc_profile, trcs=None):
     return array, None
 
 
-def infer_gamma(icc_profile):
+def infer_gamma(icc_profile, exiftool_path):
     if icc_profile['description'].lower().startswith('srgb'):
         return 2.2
 
@@ -339,8 +341,10 @@ def infer_gamma(icc_profile):
 
     if icc_profile.get('a2b'):
         # get pseudo-TRC by converting linear TRC
+        version = icc_profile.get('version') or '2.0'
+        srgb_profile = get_srgb_profile(version, exiftool_path)
         x = np.array([[[0.5, 0.5, 0.5]]])
-        trc = profile_to_profile(x, icc_profile, get_srgb_profile(version=icc_profile.get('version') or '2.0'))
+        trc = profile_to_profile(x, icc_profile, srgb_profile)
         trc = trc.mean()
         gamma = 2.2 * np.log(trc) / np.log(0.5)
         print(f"DEBUG: a2b-fitted gamma: {gamma}")
