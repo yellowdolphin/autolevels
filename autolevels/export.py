@@ -101,7 +101,6 @@ def get_iop_order_list_version(export_version):
     latest_version = '5.4'
     assert latest_version in iop_order_list, f'ERROR: invalid latest_version {latest_version}'
     if export_version is None:
-        print('Warning: no darktable version specified, using latest iop_order_list')
         # No issues found with alien modules in the list, darktable simply ignores them.
         return latest_version
 
@@ -372,12 +371,6 @@ def update_colorin_params(colorin_params, icc):
     blue_mapping = data[524:528]
     working_space_profile_type = data[528:532]
     working_space_filename = data[532:]
-    if False:
-        print(f"colorin_params: profile_type={int.from_bytes(data[:4], byteorder='little')}, "
-              f"filename={data[4:516].decode('utf-8').strip()}, intent={int.from_bytes(intent, byteorder='little')}, "
-              f"normalize={int.from_bytes(normalize, byteorder='little')}, blue_mapping={int.from_bytes(blue_mapping, byteorder='little')}, "
-              f"working_space_profile_type={int.from_bytes(working_space_profile_type, byteorder='little')}, "
-              f"working_space_filename={working_space_filename.decode('utf-8').strip()}")
 
     # params to edit
     profile_type = 0
@@ -484,7 +477,7 @@ def check_darktable_version(export_version):
 
 def darktable_change_timestamp_fixed(darktable_version):
     """Return True if apply_sidecar updates change_timestamp (not before darktable 5.4).
-    
+
     See issue #18253: https://github.com/darktable-org/darktable/issues/18253
     """
     try:
@@ -731,9 +724,6 @@ def unix_to_year1_microseconds(unix_timestamp=None):
     """
     if unix_timestamp is None:
         unix_timestamp = time.time()
-        now = True # DEBUG
-    else:
-        now = False # DEBUG
 
     # Calculate microseconds from Year 1 CE to Unix epoch (1970-01-01)
     dt_unix_epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -747,22 +737,6 @@ def unix_to_year1_microseconds(unix_timestamp=None):
 
     # Add Unix microseconds to get total microseconds since Year 1 CE
     year1_microseconds = year1_to_unix_microseconds + int(unix_timestamp * 1_000_000)
-
-    # DEBUG (remove when dt issue is fixed and tested)
-    if False and now:
-        dt = datetime.fromtimestamp((year1_microseconds - 62135596800000000) / 1e+6)
-        print(f'DEBUG current timestamp at {dt.strftime("%Y-%m-%d %H:%M:%S")} is {year1_microseconds}')
-        # database has change_timestamp 63892452067899160, 2025-09-03 01:21:07 from image.change_timestamp
-        # autolevels calculated         63892452067817010  for the same second (82150 µs earlier) -> XMP
-        # But this is not the difference, "updated sidecar file found" complaints about!
-        # 63892486336110989 - 63892486336041116 = 69873 (70 ms) around 10:52:16
-        # but "database timestamp" is reported 10:52:04
-        # when I keep the "database edit", change_timestamp is still the same as XMP file
-        # database has also "write_timestamp", which is 1756889524 before and 1756889978 after keeping the "database edit".
-        # discard history: deletes change_timestamp in XMP and database and updates write_timestamp -> 1756890775 (11:12:55)
-        # read_xmp at 11:27:54: updates change_timestamp 70 ms after XMP -> 63892488474690836 (but not write_timestamp)
-        # "updated XMP sidecar files found" compares write_timestamp aka "database timestamp" (11:12:55) with change_timestamp or actual mtime?
-        # "keep XMP edit" updates write_timestamp in the database with the correct file modification time and change_timestamp to "now"
 
     return year1_microseconds
 

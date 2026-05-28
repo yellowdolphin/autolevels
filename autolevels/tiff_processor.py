@@ -10,7 +10,7 @@ import numpy as np
 def extract_jpeg_info_from_tiff(im: Image.Image):
     """
     Extracts JPEG Q-tables and subsampling from a TIFF file with JPEG compression.
-    Bypasses PIL's missing tag limitations by parsing the DQT and SOF markers 
+    Bypasses PIL's missing tag limitations by parsing the DQT and SOF markers
     directly from the raw JPEG stream embedded in the file.
 
     Args:
@@ -63,7 +63,7 @@ def extract_jpeg_info_from_tiff(im: Image.Image):
                     i += 1 if marker == 0xFF else 2
                     continue
                 # SOS (Start of Scan) - Header parsing is complete
-                if marker == 0xDA: 
+                if marker == 0xDA:
                     break
 
                 if i + 3 >= len(data):
@@ -73,9 +73,9 @@ def extract_jpeg_info_from_tiff(im: Image.Image):
                 length = struct.unpack(">H", data[i+2:i+4])[0]
 
                 if i + 2 + length > len(data):
-                    break # Incomplete marker in our chunk
+                    break  # Incomplete marker in this chunk
 
-                if marker == 0xDB: # DQT (Define Quantization Table)
+                if marker == 0xDB:  # DQT (Define Quantization Table)
                     payload_idx = i + 4
                     end_idx = i + 2 + length
                     while payload_idx < end_idx:
@@ -91,7 +91,7 @@ def extract_jpeg_info_from_tiff(im: Image.Image):
                             q_tables[tbl_id] = list(data[payload_idx:payload_idx+tbl_len])
                         payload_idx += tbl_len
 
-                elif marker in (0xC0, 0xC1, 0xC2): # SOF0, SOF1, SOF2 (Start of Frame)
+                elif marker in (0xC0, 0xC1, 0xC2):  # SOF0, SOF1, SOF2 (Start of Frame)
                     num_components = data[i + 9]
                     offset = i + 10
                     for _ in range(num_components):
@@ -103,8 +103,8 @@ def extract_jpeg_info_from_tiff(im: Image.Image):
                         v_samp = factors & 0x0F
                         subsampling_factors[comp_id] = (h_samp, v_samp)
                         offset += 3
-                        
-                i += 2 + length # Jump to next marker
+
+                i += 2 + length  # Jump to next marker
             else:
                 i += 1
 
@@ -125,7 +125,7 @@ def extract_jpeg_info_from_tiff(im: Image.Image):
     original_pos = fp.tell()
     fp.seek(first_offset)
     data = fp.read(65536)
-    fp.seek(original_pos) # Restore pointer just in case PIL needs it
+    fp.seek(original_pos)  # Restore pointer just in case PIL needs it
 
     qt, subsamp = parse_jpeg_stream(data)
     q_tables.update(qt)
@@ -148,7 +148,7 @@ def extract_jpeg_info_from_tiff(im: Image.Image):
             elif y_factors == (1, 2):
                 subsampling_str = "4:4:0"
     elif len(subsamp) == 1:
-        subsampling_str = "4:4:4" # Effective subsampling for Grayscale
+        subsampling_str = "4:4:4"  # Effective subsampling for Grayscale
 
     return q_tables, subsampling_str
 
@@ -169,7 +169,7 @@ This script uses a binary append strategy:
   3. A new IFD0 is appended, pointing to both original structural data AND new metadata
   4. Only the 4-byte IFD0 pointer in the TIFF header is updated
 """
- # Tags that describe image structure - always taken from TARGET (never overwritten)
+# Tags that describe image structure - always taken from TARGET (never overwritten)
 TIFF_STRUCTURAL_TAGS = {
     0x0100,  # ImageWidth
     0x0101,  # ImageLength
@@ -190,6 +190,7 @@ TIFF_STRUCTURAL_TAGS = {
 
 # TIFF data type sizes in bytes
 TIFF_TYPE_SIZE = {1:1, 2:1, 3:2, 4:4, 5:8, 6:1, 7:1, 8:2, 9:4, 10:8, 11:4, 12:8}
+
 
 def get_fmt(data):
     bo = data[:2]
@@ -315,9 +316,6 @@ def transfer_metadata_tiff2tiff(source_path, target_path, output_path):
     # Start with the complete target binary (image strips at original positions)
     out = bytearray(tgt)
 
-    # Collect new metadata from source
-    new_tag_data = {}   # tag -> (type_, count, inline_or_offset, new_value_or_offset)
-
     # Decide which tags come from source vs target
     all_tags = set(src_tag_map) | set(tgt_tag_map)
 
@@ -428,7 +426,7 @@ def verify_tiff_image(fn, reference=None, strict=False):
     return True
 
 
-def exiftool_safe_transfer(src, dst, exiftool_path=None):
+def exiftool_safe_transfer(src, dst, icc_arg, exiftool_path=None):
     """
     Safely copy metadata from src to dst TIFF without altering pixel data.
 
@@ -457,9 +455,11 @@ def exiftool_safe_transfer(src, dst, exiftool_path=None):
             '-tagsFromFile', str(src),  # w/o further options, transfers all writable tags
                                         # but some values and tags are wrong
             '-exif:all', '-iptc:all', '-xmp:all',
-            '-icc_profile<icc_profile',  # adds profile if missing/deleted
             '-overwrite_original',
-        ] + [str(tmp)]
+        ]
+        if icc_arg:
+            args.append(icc_arg)
+        args.append(str(tmp))
 
         with exiftool.ExifTool(executable=exiftool_path) as et:
             shutil.copy2(dst, tmp)
@@ -475,7 +475,6 @@ def exiftool_safe_transfer(src, dst, exiftool_path=None):
             # GPS, IFD1, InteropIFD, MakerNotes, PrintIM and SubIFD.
             shutil.copy2(dst, tmp)
             args.insert(-1, '--IFD0:all')
-            res = et.execute(*[a.encode() for a in args])
 
             if verify_tiff_image(tmp, reference=src, strict=True):
                 shutil.move(tmp, dst)

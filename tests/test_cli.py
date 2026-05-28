@@ -1,10 +1,9 @@
 import shutil
 import subprocess
-from autolevels.export import iop_order_list
 import pytest
 from pathlib import Path
 from typing import Any
-from PIL import ImageCms, Image
+from PIL import Image
 import numpy as np
 import cv2
 import exiftool
@@ -14,13 +13,8 @@ import exiftool
 TEST_IMAGE = 'images/lübeck.jpg'
 MODEL = 'models/free_test.pt'
 ONNX_MODEL = 'models/free_test.onnx'
-
-# Create and save an sRGB ICC profile
-ICC_PROFILE = "images/sRGB.ICC"
-srgb_profile = ImageCms.createProfile("sRGB")
-srgb_profile = ImageCms.ImageCmsProfile(srgb_profile)
-with open(ICC_PROFILE, "wb") as icc_file:
-    icc_file.write(srgb_profile.tobytes())
+ICC_PROFILE_V2 = "sRGB"  # built-in
+ICC_PROFILE_V4 = "autolevels/data/sRGB_v4_ICC_preference.icc"
 
 # Create a minimal 48-bit RGB image (2x2 pixels, 16-bit per channel)
 image_data = np.array([
@@ -392,12 +386,14 @@ def test_48bit_images(simulate, tmp_path):
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_icc_option(simulate, tmp_path):
-    """Test --icc-profile option with 48bit images."""
+    """Test ICC profile options with 48bit images."""
     for fn in (PNG_IMAGE, TIFF_IMAGE):
         outdir = tmp_path
         output_image_path = outdir / (Path(fn).stem + '_al.jpg')
         output_image_path.unlink(missing_ok=True)
-        result = run_autolevels(f'{simulate} --outdir {outdir} --outsuffix _al.jpg --icc-profile {ICC_PROFILE} -- {fn}')
+        result = run_autolevels(f'{simulate} --outdir {outdir} --outsuffix _al.jpg '
+                                f'--input-icc-profile {ICC_PROFILE_V2} --output-icc-profile {ICC_PROFILE_V4} '
+                                f'--lut-interpolation tetrahedral -- {fn}')
         print(result.stdout)
         assert result.returncode == 0, result.stderr
         assert output_image_path.exists() != bool(simulate)
@@ -411,6 +407,7 @@ def test_icc_option(simulate, tmp_path):
                 # check sRGB profile was written to output image
                 metadata = read_metadata_tags(et, output_image_path)
                 profile = get_metadata_value(metadata, group="ICC_Profile", tag="ProfileDescription")
+                assert profile is not None, 'No ICC in output!'
                 assert profile.startswith("sRGB"), f"Expected Profile Description 'sRGB', got '{profile}'"
         output_image_path.unlink(missing_ok=True)
 
@@ -577,13 +574,15 @@ def test_format_conversion(tmp_path):
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_darktable_icc(simulate, tmp_path):
-    """Test --icc option with darktable export."""
+    """Test --icc options with darktable export."""
     fn = tmp_path / Path(TEST_IMAGE).name
     from shutil import copyfile
     copyfile(TEST_IMAGE, fn)
     OUTPUT_XMP_PATH = fn.with_suffix(fn.suffix + '.xmp')
     output_image_path = tmp_path / (Path(fn).stem + '_al.jpg')
-    result = run_autolevels(f'{simulate} --outdir {tmp_path} --model {MODEL} --icc {ICC_PROFILE} --export darktable -- {fn}')
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --model {MODEL} '
+                            f'--input-icc-profile {ICC_PROFILE_V4} --output-icc-profile {ICC_PROFILE_V2} '
+                            f'--export darktable -- {fn}')
     print(result.stdout)
     assert result.returncode == 0, result.stderr
     assert output_image_path.exists() != bool(simulate)
@@ -660,7 +659,12 @@ def test_darktable_versions(tmp_path):
         assert result.returncode == 0, result.stderr
         assert 'no darktable version specified' not in result.stdout
         assert not output_image_path.exists(), 'output image produced despite option --outsuffix'
-        assert OUTPUT_XMP_PATH.exists() is False if (dt_version == 'invalid') else True
+        if dt_version == 'invalid':
+            assert not OUTPUT_XMP_PATH.exists(), 'should exit if invalid darktable version is specified'
+            print("fail-test successful")
+            continue
+        else:
+            assert OUTPUT_XMP_PATH.exists()
 
         # Verify content of final XMP
         if not OUTPUT_XMP_PATH.exists(): continue
