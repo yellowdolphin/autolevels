@@ -387,11 +387,11 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
     if output_icc_profile and output_icc_profile['path'] is not None:
         icc_path = output_icc_profile['path']
         if output_icc_profile['path'].suffix.lower() in {'icc'}:
-            icc_arg = f'-icc_profile<={icc_path}'  # from ICC file
+            icc_arg = f'-icc_profile<="{icc_path}"'  # from ICC file
         elif icc_path == fn:
             icc_arg = '-icc_profile<icc_profile'  # embedded, from input image
         else:
-            icc_arg = f'-tagsfromfile {icc_path} -icc_profile<icc_profile'  # embedded, from a third image
+            icc_arg = f'-tagsfromfile "{icc_path}" -icc_profile<icc_profile'  # embedded, from a third image
     elif (output_icc_profile and input_icc_profile
           and output_icc_profile['description'] == input_icc_profile['description']):
         # copy ICC profile from input image
@@ -410,13 +410,13 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
             print(f"exiftool could not transfer all metadata to {out_fn}.")
         return
 
-    exiftool_args = f'-overwrite_original -tagsfromfile {fn} -all:all {icc_arg} {out_fn}'.split()
+    exiftool_args = ['-overwrite_original', '-tagsfromfile', f'{fn}', '-all:all', icc_arg, f'{out_fn}']
     with ExifToolHelper(executable=exiftool_path) as et:
         try:
             et.execute(*[a.encode() for a in exiftool_args])
 
         except ExifToolExecuteError as e:
-            print(f"exiftool error: {e.status}")
+            print(f"exiftool error: {e}")
             print(f"    {e.stdout}")
             print(f"    {e.stderr}")
 
