@@ -396,7 +396,7 @@ def convert_curve_profile(curve, input_icc_profile, working_profile):
     #print(f"DEBUG: curve stats after inv_trc: {curve.min()} {curve.max()} {curve.mean()}")
     #np.savez("trcs2.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
 
-    return curve.transpose(1, 2, 0).reshape(1, 1, 768).astype(np.float32)
+    return curve.transpose(1, 2, 0).reshape(1, 1, 768).astype(np.float32).clip(0, 1)
 
 
 def convert_curve(curve, input_icc_profile, trcs=None):
