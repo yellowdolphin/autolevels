@@ -12,6 +12,7 @@ from PIL import Image, ImageFilter
 
 import cv2
 from exiftool import ExifToolHelper
+from exiftool.exceptions import ExifToolExecuteError
 
 from autolevels.icc.icc import (get_icc_profile, convert_to_srgb, convert_curve, get_srgb_profile,
                                 profile_to_profile, infer_gamma, convert_curve_gamma, convert_curve_profile)
@@ -413,6 +414,12 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
     with ExifToolHelper(executable=exiftool_path) as et:
         try:
             et.execute(*[a.encode() for a in exiftool_args])
+
+        except ExifToolExecuteError as e:
+            print(f"exiftool error: {e.status}")
+            print(f"    {e.stdout}")
+            print(f"    {e.stderr}")
+
         except Exception as e:
             print(f"exiftool error: {e}")
 
