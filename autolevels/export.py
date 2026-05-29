@@ -489,7 +489,7 @@ def darktable_change_timestamp_fixed(darktable_version):
     return True
 
 
-def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_file=None, export_version=None):
+def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc_path=None, new_xmp_file=None, export_version=None):
     """
     Append a new RGB curve history item to the XMP file.
 
@@ -655,10 +655,10 @@ def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_fi
                 xmp_lines.append(line)
                 continue
 
-            elif icc and in_colorin and line.strip().startswith('darktable:params='):
+            elif icc_path and in_colorin and line.strip().startswith('darktable:params='):
                 assert 'auto_presets' not in missing, 'found colorin despite missing auto_presets'
                 colorin_params = line.strip().split('params=')[1].replace('"', '')
-                colorin_params = update_colorin_params(colorin_params, icc)
+                colorin_params = update_colorin_params(colorin_params, icc_path)
                 xmp_lines.append(f'      darktable:params="{colorin_params}"\n')
                 in_colorin = False
                 continue
@@ -668,8 +668,8 @@ def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc=None, new_xmp_fi
                     # Append new history items (auto presets)
                     xmp_lines.append("     <rdf:li\n")
                     for key, value in history_item_colorin.items():
-                        if key == 'params' and icc:
-                            colorin_params = update_colorin_params(value, icc)
+                        if key == 'params' and icc_path:
+                            colorin_params = update_colorin_params(value, icc_path)
                             xmp_lines.append(f'      darktable:params="{colorin_params}"\n')
                             continue
                         end_tag = "/>" if key == 'blendop_params' else ""

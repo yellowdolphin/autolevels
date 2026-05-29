@@ -149,18 +149,82 @@ def decode_trc(raw):
         return fn, inv_fn
 
     if sig == 'para':
-        # Decode parametric curve
+        # Decode parametric curves
         n_params = len(raw) // 4 - 3
         function_type, *params = struct.unpack(f'>H2x{n_params}i', raw[8:])
-        #print(f"Parametric curve of type {function_type} with {n_params} parameters:")
+        print(f"Parametric curve of type {function_type} with {n_params} parameters: {params}")
 
+        # Type 0, plain gamma
+        if function_type == 0:
+            if n_params != 1:
+                raise ValueError(f"bad ICC profile: type 0 parametric curve must have exactly 1 parameter, got {n_params}")
+            g = params[0] / 65536
+            if g <= 0:
+                raise ValueError(f"bad ICC profile: type 0 parametric curve must have positive parameter, got {g}")
+            if g == 1:
+                return (lambda x: x, lambda x: x)
+            return (lambda x: x ** g, lambda x: x ** (1 / g))
+
+        # Type 1, clipped gamma
+        if function_type == 1:
+            if n_params != 3:
+                raise ValueError(f"bad ICC profile: type 1 parametric curve must have exactly 3 parameters, got {n_params}")
+            g, a, b = (p / 65536 for p in params)
+            if g <= 0:
+                raise ValueError(f"bad ICC profile: type 1 parametric curve must have positive parameter, got {g}")
+            if a <= 0:
+                raise ValueError(f"bad ICC profile: type 1 parametric curve must have positive a parameter, got a={a}")
+            if g == 1:
+                return (lambda x: a * x + b, lambda x: (x - b) / a)
+            return get_clipped_gamma_trc(g, a, b)
+
+        # Type 2, clipped gamma with manual offset
+        if function_type == 2:
+            if n_params != 4:
+                raise ValueError(f"bad ICC profile: type 2 parametric curve must have exactly 4 parameters, got {n_params}")
+            g, a, b, d = (p / 65536 for p in params)
+            if g <= 0:
+                raise ValueError(f"bad ICC profile: type 2 parametric curve must have positive parameter, got {g}")
+            if a <= 0:
+                raise ValueError(f"bad ICC profile: type 2 parametric curve must have positive a parameter, got a={a}")
+            if d < -b / a:
+                raise ValueError(f"bad ICC profile: type 2 parametric curve must have d >= -b/a, got d={d}, a={a}, b={b}")
+            return get_clipped_gamma_trc(g, a, b, d)
+
+        # Type 3, classic sRGB-like Gamma function with linear segment
         if function_type == 3 and n_params == 5:
-            # sRGB-like Gamma function
             g, a, b, c, d = (p / 65536 for p in params)
-            #print(f"g: {g}\na: {a}\nb: {b}\nc: {c}\nd: {d}")
             return get_gamma_trc(g, a, b, c, d)
 
+    print("DEBUG para:", len(sig), type(sig), sig == 'para')
     raise NotImplementedError(f"cannot decode TRC of type {sig}")
+
+
+def get_clipped_gamma_trc(g, a, b, d=None):
+    """
+    Create a type-1 or type-2 parametric TRC function
+    """
+    def fn(x):
+        """device -> linear"""
+        threshold = -b / a if d is None else d
+        with np.errstate(invalid="ignore"):
+            return np.where(
+                x >= threshold,
+                (a * x + b) ** g,  # raises Warning for ax + b < 0
+                0,  # check this is correct
+            )
+
+    def inv_fn(x):
+        """linear -> device"""
+        threshold = 0 if d is None else (a * d + b) ** g
+        with np.errstate(invalid="ignore"):
+            return np.where(
+                x >= threshold,
+                (x ** (1 / g) - b) / a,  # raises Warning for x < 0
+                (min(0, -b / a) if d is None else d),
+            )
+
+    return fn, inv_fn
 
 
 def get_gamma_trc(g=2.4, a=1/1.055, b=0.055/1.055, c=1/12.92, d=0.04045):
@@ -384,7 +448,7 @@ def convert_curve_profile(curve, input_icc_profile, working_profile):
     curve = curve.reshape(1, 3, 256).transpose(2, 0, 1).astype(np.float64)
     grid_points = np.tile(np.linspace(0, 1, 256, dtype=np.float64)[:, None, None], (1, 1, 3))
     print("Converting curve back from working to input profile...")
-    #print(f"DEBUG: curve stats before: {curve.dtype} {curve.min()} {curve.max()} {curve.mean()}")
+    print(f"DEBUG: curve stats before: {curve.dtype} {curve.min()} {curve.max()} {curve.mean()}")
     #np.savez("trcs1.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
 
     curve_x_rgb = profile_to_profile(grid_points, working_profile, input_icc_profile)
@@ -563,7 +627,7 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
     target_cm = output_icc_profile.get('cm') if b2a_data is None else None
     target_trcs = output_icc_profile.get('trcs') if b2a_data is None else None
 
-    #print("DEBUG: image before conversion:", array.dtype, array.min(), array.mean(), array.max())
+    print("DEBUG: image before conversion:   ", array.dtype, array.min(), array.mean(), array.max())
 
     # input -> linear RGB
     if source_trcs is not None:
@@ -578,14 +642,14 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
             for i, tag in enumerate(TRC_TAGS[0:3]):
                 trc = input_icc_profile['trcs'][tag][0]
                 array[:, :, i] = trc(array[:, :, i])
-            #print("DEBUG: after input TRC:", array.dtype, array.min(), array.mean(), array.max())
+            print("DEBUG: linear RGB after input TRC:", array.dtype, array.min(), array.mean(), array.max())
 
     # Input color matrix
     if source_cm is not None:
         array = array @ source_cm
-        #print("DEBUG: XYZ after cm:")
-        #for c in range(3):
-        #    print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
+        print("DEBUG: XYZ after input CM:")
+        for c in range(3):
+            print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
 
         # Ensure LUT and CM/TRC profile use the same XYZ normalization
         if b2a_data is not None:
@@ -622,9 +686,9 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
             src_lut_type = '' if a2b_data is None else a2b_data['type'],
             dst_lut_type = '' if b2a_data is None else b2a_data['type'],
         ).reshape(H, W, C)
-        #print("DEBUG: Lab stats after PCS conversion:")
-        #for c in range(3):
-        #    print(f"  {'Lab'[c]}: min={array[:, :, c].min():.4f}, max={array[:, :, c].max():.4f}, mean={array[:, :, c].mean():.4f}")
+        print("DEBUG: Lab stats after PCS conversion:")
+        for c in range(3):
+            print(f"  {'Lab'[c]}: min={array[:, :, c].min():.4f}, max={array[:, :, c].max():.4f}, mean={array[:, :, c].mean():.4f}")
 
     # Output color matrix
     if target_cm is not None:
@@ -636,12 +700,12 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
 
         inverse_output_cm = np.linalg.inv(target_cm)
         array = array @ inverse_output_cm
-        #print("DEBUG: linear RGB after output CM:", array.dtype, array.min(), array.mean(), array.max())
+        print("DEBUG: linear RGB after output CM:", array.dtype, array.min(), array.mean(), array.max())
 
     # B2A
     if b2a_data is not None:
         array = apply_a2b(array, b2a_data, lut_interpolation)
-        #print("DEBUG: array stats after B2A: min={:.4f}, max={:.4f}, mean={:.4f}".format(array.min(), array.max(), array.mean()))
+        print("DEBUG: RGB after output B2A: min={:.4f}, max={:.4f}, mean={:.4f}".format(array.min(), array.max(), array.mean()))
         return array
 
     # linear RGB -> output
@@ -657,7 +721,7 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
             for i, tag in enumerate(TRC_TAGS[0:3]):
                 inv_trc = target_trcs[tag][1]
                 array[:, :, i] = inv_trc(array[:, :, i])
-        #print("DEBUG: RGB after output TRC:", array.dtype, array.min(), array.mean(), array.max())
+        print("DEBUG: RGB after output TRC:", array.dtype, array.min(), array.mean(), array.max())
 
     return array
 

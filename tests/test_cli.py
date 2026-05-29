@@ -586,7 +586,9 @@ def test_darktable_icc(simulate, tmp_path):
     print(result.stdout)
     assert result.returncode == 0, result.stderr
     assert output_image_path.exists() != bool(simulate)
-    assert OUTPUT_XMP_PATH.exists()
+    assert OUTPUT_XMP_PATH.exists() != bool(simulate)
+    if simulate:
+        return
 
     # Verify content of final XMP
     namespaces = {

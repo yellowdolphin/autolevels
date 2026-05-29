@@ -4,6 +4,7 @@ __version__ = '1.4.0'
 from pathlib import Path
 from argparse import ArgumentParser
 import sys
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
@@ -386,31 +387,38 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
     # Embed ICC profile when known
     if output_icc_profile and output_icc_profile['path'] is not None:
         icc_path = output_icc_profile['path']
-        if output_icc_profile['path'].suffix.lower() in {'icc'}:
-            icc_arg = f'-icc_profile<="{icc_path}"'  # from ICC file
+        if icc_path.suffix.lower() in {'.icc', '.icm'}:
+            icc_args = [f'-icc_profile<={icc_path}']  # from ICC file
+            #print(f"embedding profile from {icc_path}")
         elif icc_path == fn:
-            icc_arg = '-icc_profile<icc_profile'  # embedded, from input image
+            icc_args = ['-icc_profile<icc_profile']  # embedded, from input image
+            #print(f"copying profile from input file")
         else:
-            icc_arg = f'-tagsfromfile "{icc_path}" -icc_profile<icc_profile'  # embedded, from a third image
+            icc_args = ['-tagsfromfile', f'{icc_path}', '-icc_profile<icc_profile']
+            #print(f"embedding profile from {icc_path}")
     elif (output_icc_profile and input_icc_profile
           and output_icc_profile['description'] == input_icc_profile['description']):
         # copy ICC profile from input image
-        icc_arg = '-icc_profile<icc_profile'
+        icc_args = ['-icc_profile<icc_profile']
+        #print("copying profile from input file")
     elif input_icc_profile:
         print(f"Warning: no source file for sRGB v2 ICC profile (input image: {input_icc_profile['description']})")
-        icc_arg = ''  # should only happen if user requests built-in "sRGB" (v2) output profile
+        icc_args = []  # should only happen if user requests built-in "sRGB" (v2) output profile
     else:
-        icc_arg = ''  # don't embed sRGB v2 by default when input image has no ICC profile, neither
+        icc_args = []  # don't embed sRGB v2 by default when input image has no ICC profile, neither
 
     if out_format == 'TIFF' and kwargs.get('compression', '') == 'jpeg':
         # Injecting metadata to TIFF with JPEG compression is unsafe
         from autolevels.tiff_processor import exiftool_safe_transfer
-        result = exiftool_safe_transfer(fn, out_fn, icc_arg, exiftool_path)
+        result = exiftool_safe_transfer(fn, out_fn, icc_args, exiftool_path)
         if result is False:
             print(f"exiftool could not transfer all metadata to {out_fn}.")
         return
 
-    exiftool_args = ['-overwrite_original', '-tagsfromfile', f'{fn}', '-all:all', icc_arg, f'{out_fn}']
+    exiftool_args = ['-overwrite_original', '-tagsfromfile', f'{fn}', '-all:all']
+    exiftool_args.extend(icc_args)
+    exiftool_args.append(f'{out_fn}')
+
     with ExifToolHelper(executable=exiftool_path) as et:
         try:
             et.execute(*[a.encode() for a in exiftool_args])
@@ -715,9 +723,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         arg.export = arg.export[0]
         if arg.export not in supported_exports:
             return f'Error: invalid export {arg.export}, must be one of {supported_exports}'
-    if not (arg.outsuffix and arg.outsuffix.endswith('.xmp')):
-        import shutil
-        exiftool_path = arg.exiftool or shutil.which('exiftool')
+    exiftool_path = arg.exiftool or shutil.which('exiftool')
     if arg.model:
         for fn in arg.model:
             if not Path(fn).exists():
@@ -727,29 +733,33 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             return 'Error: cannot export curves to darktable XMP without a model'
         if arg.export == 'darktable':
             print('Warning: ignoring option --export darktable, no model specified')
-    if arg.input_icc_profile and arg.input_icc_profile.lower() != 'srgb':
-        # TODO: implement more built-in ICC profiles and handle version consistent with
-        # output_icc_profile
-        icc_file = Path(arg.input_icc_profile)
-        if not icc_file.exists():
-            return f'Error: file not found: {icc_file}'
-        input_icc_profile = get_icc_profile(icc_file, exiftool_path)
-        print(f"DEBUG: input ICC profile from {icc_file}: {input_icc_profile['description']}")
-    else:
-        input_icc_profile = None  # read from each input file
+    if arg.input_icc_profile:
+        # Set global profile for all input images
+        if arg.input_icc_profile.lower() == 'srgb':
+            pass  # define after output profile (get target ICC version first)
+            # TODO: implement more built-in ICC profiles
+        else:
+            icc_file = Path(arg.input_icc_profile)
+            if not icc_file.exists():
+                return f'Error: file not found: {icc_file}'
+            arg.input_icc_profile = get_icc_profile(icc_file, exiftool_path)
+            print(f"DEBUG: global input ICC profile from {icc_file}: {arg.input_icc_profile['description']}")
     if arg.output_icc_profile:
+        # Set global profile for all output images
         if arg.output_icc_profile.lower() == 'srgb':
-            icc_version = input_icc_profile['version'] if input_icc_profile else '2.0.0'
+            icc_version = arg.input_icc_profile['version'] if isinstance(arg.input_icc_profile, dict) else '2.0'
             print(f"DEBUG: Creating sRGB version {icc_version} as target profile")
-            output_icc_profile = get_srgb_profile(icc_version, exiftool_path)
+            arg.output_icc_profile = get_srgb_profile(icc_version, exiftool_path)
         else:
             icc_file = Path(arg.output_icc_profile)
             if not icc_file.exists():
                 return f'Error: file not found: {icc_file}'
-            output_icc_profile = get_icc_profile(icc_file, exiftool_path)
-            print(f"DEBUG: output ICC profile from {icc_file}: {output_icc_profile['description']}")
-    else:
-        output_icc_profile = None  # use input_rgb_profile
+            arg.output_icc_profile = get_icc_profile(icc_file, exiftool_path)
+            print(f"DEBUG: global output ICC profile from {icc_file}: {arg.output_icc_profile['description']}")
+    if isinstance(arg.input_icc_profile, str) and arg.input_icc_profile.lower() == 'srgb':
+        icc_version = arg.output_icc_profile['version'] if arg.output_icc_profile else '2.0'
+        arg.input_icc_profile = get_srgb_profile(icc_version, exiftool_path)
+        print(f"DEBUG: global input ICC profile: built-in sRGB {icc_version}")
     model_space = arg.model_space.lower()
     if model_space not in {'none', 'trc', 'srgb', 'gamma'}:
         return f'Error: invalid model space {arg.model_space}'
@@ -867,15 +877,31 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             array = imread_unicode(fn)
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255
 
-        # Get ICC profile from input file if no ICC file was provided, fallback: sRGB
+        # Get ICC profile from input file if no global ICC file was provided, fallback: sRGB
+        if arg.input_icc_profile is None:
+            input_icc_profile = get_icc_profile(fn, exiftool_path)
+            if input_icc_profile is None:
+                pass  # get output_icc_profile first
+            else:
+                print(f"DEBUG: input image has embedded ICC profile: {input_icc_profile['description']}")
+        else:
+            input_icc_profile = arg.input_icc_profile
+        if arg.output_icc_profile is None:
+            # Keep input profile as target
+            if input_icc_profile is not None:
+                output_icc_profile = input_icc_profile
+            else:
+                # If both are None, use sRGB version 2
+                input_icc_profile = get_srgb_profile(version='2.0', exiftool_path=exiftool_path)
+                output_icc_profile = input_icc_profile
+        else:
+            output_icc_profile = arg.output_icc_profile
         if input_icc_profile is None:
-            print("DEBUG: Trying to load ICC profile from input file...")
-        input_icc_profile = input_icc_profile or get_icc_profile(fn, exiftool_path)
-        if input_icc_profile is None:
-            input_icc_profile = get_srgb_profile(
-                version=output_icc_profile['version'] if output_icc_profile else '2.0.0',
-                exiftool_path=exiftool_path)
-            print(f"Assuming sRGB: {input_icc_profile['description']}")
+            # Use sRGB with same version as target profile
+            version = output_icc_profile['version']
+            input_icc_profile = get_srgb_profile(version=version, exiftool_path=exiftool_path)
+        print(f"DEBUG: Input  ICC profile: {input_icc_profile['description']}")
+        print(f"DEBUG: Output ICC profile: {output_icc_profile['description']}")
 
         # Check conditions for 48-bit output
         out_48bit = all((array.dtype == np.dtype('uint16'),
@@ -925,11 +951,14 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 continue
 
             resized = cv2.resize(array, (384, 384)[::-1])  # uint16 or uint8
-            if input_icc_profile['description'].startswith('sRGB') or model_space == 'none':
+            if 'srgb' in input_icc_profile['description'].lower() or model_space == 'none':
                 free_curve = model(resized)
             elif model_space == 'srgb':
-                icc_version = input_icc_profile['version'] if input_icc_profile else '2.0.0'
+                # Conversion to sRGB v4 yields quite different results, probably this is not a good idea
+                #icc_version = input_icc_profile['version'] if input_icc_profile else '2.0.0'
+                icc_version = '2.0'  # always convert to sRGB v2
                 srgb_profile = get_srgb_profile(icc_version, exiftool_path)
+                print(f"DEBUG: converting model input to {srgb_profile['description']}")
                 resized = resized.astype(np.float32) / maxvalue
                 resized = profile_to_profile(resized, input_icc_profile, srgb_profile)
                 resized = (resized * maxvalue).round().astype(np.uint8 if maxvalue == 255 else np.uint16)
@@ -938,6 +967,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 free_curve = model(resized)
                 free_curve = convert_curve_profile(free_curve, input_icc_profile, srgb_profile)
             elif model_space == 'trc':
+                print("DEBUG: converting model input to sRGB TRC")
                 if 'srgb_trcs' not in globals():
                     srgb_trcs = None
                 resized, srgb_trcs = convert_to_srgb(resized, input_icc_profile, exiftool_path, srgb_trcs)
@@ -946,6 +976,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 free_curve = model(resized)
                 free_curve = convert_curve(free_curve, input_icc_profile, srgb_trcs)
             elif model_space == 'gamma':
+                print("DEBUG: adapting gamma of model input")
                 # Infer gamma of input_color_space
                 input_gamma = infer_gamma(input_icc_profile, exiftool_path)
                 resized = resized.astype(np.float32) / maxvalue
@@ -969,10 +1000,14 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     skip_image_output = False
 
                 try:
-                    # if xmp exists, icc will be ignored, otherwise consider for xmp generation
-                    append_rgbcurve_history_item(xmp_file, free_curve, pil_img,
-                                                 icc=arg.input_icc_profile,
-                                                 export_version=export_version)
+                    if arg.simulate:
+                        skip_image_output = True
+                    else:
+                        # icc_path is ignored if xmp_file exists, otherwise considered for xmp generation
+                        icc_path = arg.input_icc_profile.get('path') if arg.input_icc_profile else None
+                        append_rgbcurve_history_item(xmp_file, free_curve, pil_img,
+                                                     icc_path=icc_path,
+                                                     export_version=export_version)
                 except Exception as e:
                     print(f'Error: failed generating {xmp_file}, skipping darktable export.')
                     print(e)  # DEBUG
@@ -1061,7 +1096,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             array = blend(array, L, saturation)
 
         # Convert to output color space
-        if output_icc_profile is None:
+        if arg.output_icc_profile is None:
+            # Use (current) input ICC profile if no output ICC profile is specified
             output_icc_profile = input_icc_profile
         elif output_icc_profile['description'] != input_icc_profile['description']:
             print(f"Converting image from {input_icc_profile['description']} to {output_icc_profile['description']}")

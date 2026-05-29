@@ -426,7 +426,7 @@ def verify_tiff_image(fn, reference=None, strict=False):
     return True
 
 
-def exiftool_safe_transfer(src, dst, icc_arg, exiftool_path=None):
+def exiftool_safe_transfer(src, dst, icc_args, exiftool_path=None):
     """
     Safely copy metadata from src to dst TIFF without altering pixel data.
 
@@ -457,8 +457,8 @@ def exiftool_safe_transfer(src, dst, icc_arg, exiftool_path=None):
             '-exif:all', '-iptc:all', '-xmp:all',
             '-overwrite_original',
         ]
-        if icc_arg:
-            args.append(icc_arg)
+        if icc_args:
+            args.extend(icc_args)
         args.append(str(tmp))
 
         with exiftool.ExifTool(executable=exiftool_path) as et:
