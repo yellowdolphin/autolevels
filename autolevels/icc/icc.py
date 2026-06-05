@@ -3,6 +3,8 @@ from importlib import resources
 import numpy as np
 import exiftool
 from autolevels.icc.lut import decode_lut, apply_a2b
+import lcms2
+from PIL import Image
 
 
 TRC_TAGS = 'RedTRC', 'GreenTRC', 'BlueTRC', 'GrayTRC'
@@ -81,8 +83,20 @@ def get_icc_profile(path, exittool_path):
     if b2a_data:
         profile['b2a'] = b2a_data
 
+    try:
+        if path.suffix.lower() in {'.icc', '.icm'}:
+            profile['lcms'] = lcms2.Profile(filename=str(path))
+        else:
+            # Extract ICC bytes embedded in image files, lcms can't read those
+            with Image.open(path) as img:
+                icc_bytes = img.info.get("icc_profile")
+                profile['lcms'] = lcms2.Profile(buffer=icc_bytes)
+    except Exception as e:
+        print(f"lcms error on {path}:", e)
+        raise
+
     # DEBUG
-    if True:
+    if False:
         for key, value in profile.items():
             if key in {'a2b', 'b2a'} and value:
                 print(f"    {key} data:")
@@ -156,7 +170,7 @@ def decode_trc(raw):
         # Decode parametric curves
         n_params = len(raw) // 4 - 3
         function_type, *params = struct.unpack(f'>H2x{n_params}i', raw[8:])
-        print(f"Parametric curve of type {function_type} with {n_params} parameters: {params}")
+        #print(f"Parametric curve of type {function_type} with {n_params} parameters: {params}")
 
         # Type 0, plain gamma
         if function_type == 0:
@@ -300,7 +314,8 @@ def get_srgb_profile(version, exiftool_path):
         'version': '2.0.0',
         'pcs': 'XYZ',
         'trcs': {tag: gamma_trc for tag in TRC_TAGS[0:3]},
-        'cm': np.array(sRGB_CM_V2)
+        'cm': np.array(sRGB_CM_V2),
+        'lcms': lcms2.Profile('sRGB'),
     }
     return profile
 
@@ -579,7 +594,7 @@ def convert_curve(curve, input_icc_profile, trcs=None):
 
 
 def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_intent='perceptual',
-                       lut_interpolation='linear'):
+                       lut_interpolation='linear', lcms=True):
     """
     Convert pixel array from input to output color space
 
@@ -595,6 +610,46 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
     # disable for debugging
     #if output_icc_profile['description'] == input_icc_profile['description']:
     #    return array
+
+    if lcms:
+        assert input_icc_profile.get('lcms') is not None
+        assert output_icc_profile.get('lcms') is not None
+        source_profile = input_icc_profile['lcms']
+        target_profile = output_icc_profile['lcms']
+        dtype_suffix = 'FLT' if array.dtype == np.float32 else 'DBL'
+        print(f"lcms transform from {source_profile.name} to {target_profile.name}...")
+        try:
+            transform = lcms2.Transform(source_profile, f"RGB_{dtype_suffix}", target_profile, f"RGB_{dtype_suffix}",
+                                        intent=rendering_intent.upper(),
+                                        #flags="GAMUTCHECK,SOFTPROOFING",
+                                        )
+        except Exception as e:
+            print(f"lcms cannot transform from {source_profile.name} to {target_profile.name}: {e}")
+
+        print(f"apply to {array.dtype} array...")
+        try:
+            array = transform.apply(array)
+            assert array is not None
+            return array
+
+        except Exception as e:
+            print(f'lcms failed to transform from {source_profile.name} to {target_profile.name}: {e}\n')
+            lcms = False
+
+        if False:
+            # DEBUG (needs lcms to succeed)
+            lcms_rgb = transform.apply(array)
+            xyz_profile = lcms2.Profile('XYZ')
+            lab_profile = lcms2.Profile('Lab')
+            transform_xyz = lcms2.Transform(source_profile, "RGB_FLT", xyz_profile, "XYZ_FLT",
+                                            intent=rendering_intent.upper())
+            transform_lab = lcms2.Transform(source_profile, "RGB_FLT", lab_profile, "Lab_FLT",
+                                            intent=rendering_intent.upper())
+            lcms_xyz = transform_xyz.apply(array)
+            lcms_lab = transform_lab.apply(array)
+            lcms_lab[..., 0] /= 100
+            lcms_lab[..., 1] = (lcms_lab[..., 1] + 128.0) / 255.0
+            lcms_lab[..., 2] = (lcms_lab[..., 2] + 128.0) / 255.0
 
     # Check if conversion is possible with the two profiles, establish ICC.1:2022 precedence.
     # LUT-based ICC profile must support at least 'perceptual' rendering intent.
@@ -724,6 +779,11 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
             print("DEBUG: XYZ after LUT-like normalization:")
             for c in range(3):
                 print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
+            if lcms:
+                print("\nlcms XYZ stats:")
+                for c in range(3):
+                    print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, lcms_xyz[:, :, c].min(), lcms_xyz[:, :, c].max(), lcms_xyz[:, :, c].mean()))
+
 
     # A2B
     if a2b_data is not None:
@@ -733,10 +793,18 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
             print("DEBUG: Lab stats after A2B:")
             for c in range(3):
                 print(f"  {'Lab'[c]}: min={array[:, :, c].min():.4f}, max={array[:, :, c].max():.4f}, mean={array[:, :, c].mean():.4f}")
+            if lcms:
+                print("\nlcms Lab stats:")
+                for c in range(3):
+                    print(f"  {'Lab'[c]}: min={lcms_lab[:, :, c].min():.4f}, max={lcms_lab[:, :, c].max():.4f}, mean={lcms_lab[:, :, c].mean():.4f}")
         else:
             print("DEBUG: XYZ stats after A2B:")
             for c in range(3):
                 print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
+            if lcms:
+                print("\nlcms XYZ stats:")
+                for c in range(3):
+                    print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, lcms_xyz[:, :, c].min(), lcms_xyz[:, :, c].max(), lcms_xyz[:, :, c].mean()))
 
     # Compare PCS with profile type
     if not b2a_data and output_icc_profile['pcs'] != 'XYZ':
@@ -766,10 +834,18 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
             print("DEBUG: Lab stats after PCS conversion:")
             for c in range(3):
                 print(f"  {'Lab'[c]}: min={array[:, :, c].min():.4f}, max={array[:, :, c].max():.4f}, mean={array[:, :, c].mean():.4f}")
+            if lcms:
+                print("\nlcms Lab stats:")
+                for c in range(3):
+                    print(f"  {'Lab'[c]}: min={lcms_lab[:, :, c].min():.4f}, max={lcms_lab[:, :, c].max():.4f}, mean={lcms_lab[:, :, c].mean():.4f}")
         else:
             print("DEBUG: XYZ stats after PCS conversion:")
             for c in range(3):
                 print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
+            if lcms:
+                print("\nlcms XYZ stats:")
+                for c in range(3):
+                    print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, lcms_xyz[:, :, c].min(), lcms_xyz[:, :, c].max(), lcms_xyz[:, :, c].mean()))
 
     # Output color matrix
     if target_cm is not None:
@@ -795,6 +871,8 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
     if b2a_data is not None:
         array = apply_a2b(array, b2a_data, lut_interpolation)
         print("DEBUG: RGB after output B2A: min={:.4f}, max={:.4f}, mean={:.4f}".format(array.min(), array.max(), array.mean()))
+        if lcms:
+            print("lcms:  RGB:                  min={:.4f}, max={:.4f}, mean={:.4f}".format(lcms_rgb.min(), lcms_rgb.max(), lcms_rgb.mean()))
         return array
 
     # linear RGB -> output
