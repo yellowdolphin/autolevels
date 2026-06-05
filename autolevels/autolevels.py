@@ -763,6 +763,10 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
     model_space = arg.model_space.lower()
     if model_space not in {'none', 'trc', 'srgb', 'gamma'}:
         return f'Error: invalid model space {arg.model_space}'
+    if arg.rendering_intent.startswith('relative'):
+        arg.rendering_intent = 'relative_colorimetric'
+    elif arg.rendering_intent.startswith('absolute'):
+        arg.rendering_intent = 'absolute_colorimetric'
 
     # Input file names
     path = Path(arg.folder)
@@ -954,16 +958,14 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             if 'srgb' in input_icc_profile['description'].lower() or model_space == 'none':
                 free_curve = model(resized)
             elif model_space == 'srgb':
-                # Conversion to sRGB v4 yields quite different results, probably this is not a good idea
-                #icc_version = input_icc_profile['version'] if input_icc_profile else '2.0.0'
-                icc_version = '2.0'  # always convert to sRGB v2
+                icc_version = input_icc_profile['version'] if input_icc_profile else '2.0'
                 srgb_profile = get_srgb_profile(icc_version, exiftool_path)
                 print(f"DEBUG: converting model input to {srgb_profile['description']}")
                 resized = resized.astype(np.float32) / maxvalue
                 resized = profile_to_profile(resized, input_icc_profile, srgb_profile)
-                resized = (resized * maxvalue).round().astype(np.uint8 if maxvalue == 255 else np.uint16)
+                resized = (resized.clip(0, 1) * maxvalue).round().astype(np.uint8 if maxvalue == 255 else np.uint16)
                 #Image.fromarray(resized if maxvalue == 255 else (resized * (255 / 65535)).astype(np.uint8)).save('debug.png')
-                #print("DEBUG: wrote model input to debug.png")
+                #print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
                 free_curve = model(resized)
                 free_curve = convert_curve_profile(free_curve, input_icc_profile, srgb_profile)
             elif model_space == 'trc':

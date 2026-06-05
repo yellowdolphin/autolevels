@@ -12,7 +12,7 @@ B2A_TAGS = 'BToA0', 'BToA1', 'BToA2', 'BToA3'
 sRGB_CM_V2 = [[0.43607, 0.22249, 0.01392],
               [0.38515, 0.71687, 0.09708],
               [0.14307, 0.06061, 0.7141]]
-D50 = np.array([0.9642, 1.0, 0.8249])  # ICC D50 white point (XYZ)
+D50 = np.array([0.9642, 1.0, 0.8249])  # ICC D50 PCS illuminant (XYZ)
 
 
 def get_icc_profile(path, exittool_path):
@@ -37,16 +37,25 @@ def get_icc_profile(path, exittool_path):
 
         # Get PCS (Profile Connection Space)
         pcs = et.execute('-ICC_Profile:ProfileConnectionSpace', str(path)).split(':')[-1].strip()
+        if not pcs:
+            print(f"Error: profile {path} has no ProfileConnectionSpace tag")
+            return None
+        profile['pcs'] = pcs
 
-        # Decode TRC (Transfer Function) data
-        for tag in TRC_TAGS:
-            raw = et.execute(f'-ICC_Profile:{tag}', '-b', str(path), raw_bytes=True)  # bytes directly
-            trc_function = decode_trc(raw)  # (decoding TRC, encoding TRC)
-            if all(trc_function):
-                trcs[tag] = trc_function
+        if pcs == 'XYZ':  # ICC.1:2022 requires this for CM/TRC profiles
+            # Decode TRC (Transfer Function) data
+            for tag in TRC_TAGS:
+                raw = et.execute(f'-ICC_Profile:{tag}', '-b', str(path), raw_bytes=True)  # bytes directly
+                trc_function = decode_trc(raw)  # (TRC, inverse TRC)
+                if all(trc_function):
+                    trcs[tag] = trc_function
+            if trcs:
+                profile['trcs'] = trcs
 
-        # Get Color Matrix data
-        cm = [et.execute('-n', '-s3', f'-ICC_Profile:{tag}', str(path)).split()[-3:] for tag in CM_TAGS]
+            # Get Color Matrix data
+            cm = [et.execute('-n', '-s3', f'-ICC_Profile:{tag}', str(path)).split()[-3:] for tag in CM_TAGS]
+            if all(cm):
+                profile['cm'] = np.array(cm, dtype=np.float32)
 
         # Get A2B (AToB) data
         a2b_data = {}
@@ -67,18 +76,13 @@ def get_icc_profile(path, exittool_path):
     profile['path'] = path
     profile['description'] = description
     profile['version'] = icc_version or '2.0.0'
-    if trcs:
-        profile['trcs'] = trcs
-    if all(cm):
-        profile['cm'] = np.array(cm, dtype=np.float32)
     if a2b_data:
         profile['a2b'] = a2b_data
     if b2a_data:
         profile['b2a'] = b2a_data
-    profile['pcs'] = pcs or 'XYZ'
 
     # DEBUG
-    if False:
+    if True:
         for key, value in profile.items():
             if key in {'a2b', 'b2a'} and value:
                 print(f"    {key} data:")
@@ -182,46 +186,55 @@ def decode_trc(raw):
         if function_type == 2:
             if n_params != 4:
                 raise ValueError(f"bad ICC profile: type 2 parametric curve must have exactly 4 parameters, got {n_params}")
-            g, a, b, d = (p / 65536 for p in params)
+            g, a, b, c = (p / 65536 for p in params)
             if g <= 0:
                 raise ValueError(f"bad ICC profile: type 2 parametric curve must have positive parameter, got {g}")
             if a <= 0:
                 raise ValueError(f"bad ICC profile: type 2 parametric curve must have positive a parameter, got a={a}")
-            if d < -b / a:
-                raise ValueError(f"bad ICC profile: type 2 parametric curve must have d >= -b/a, got d={d}, a={a}, b={b}")
-            return get_clipped_gamma_trc(g, a, b, d)
+            return get_clipped_gamma_trc(g, a, b, c)
 
         # Type 3, classic sRGB-like Gamma function with linear segment
         if function_type == 3 and n_params == 5:
             g, a, b, c, d = (p / 65536 for p in params)
+            discontinuity = abs(c * d - (a * d + b) ** g)
+            if discontinuity > 1e-4:
+                print(f"Warning: ICC profile of type 3 has discontinuity of {discontinuity}")
             return get_gamma_trc(g, a, b, c, d)
+
+        # Type 4
+        if function_type == 4 and n_params == 7:
+            g, a, b, c, d, e, f = (p / 65536 for p in params)
+            discontinuity = abs((a * d + b) ** g + e - c * d - f)
+            if discontinuity > 1e-4:
+                print(f"Warning: ICC profile of type 4 has discontinuity of {discontinuity}")
+            if d < -b / a:
+                raise ValueError(f"bad ICC profile: type 4 parametric curve must have d >= -b / a, got d={d}, -b/a={-b/a}")
+            return get_7p_trc(g, a, b, c, d, e, f)
 
     print("DEBUG para:", len(sig), type(sig), sig == 'para')
     raise NotImplementedError(f"cannot decode TRC of type {sig}")
 
 
-def get_clipped_gamma_trc(g, a, b, d=None):
+def get_clipped_gamma_trc(g, a, b, c=0):
     """
     Create a type-1 or type-2 parametric TRC function
     """
     def fn(x):
         """device -> linear"""
-        threshold = -b / a if d is None else d
         with np.errstate(invalid="ignore"):
             return np.where(
-                x >= threshold,
-                (a * x + b) ** g,  # raises Warning for ax + b < 0
-                0,  # check this is correct
+                x >= -b / a,
+                (a * x + b) ** g + c,  # raises Warning for ax + b < 0
+                c,
             )
 
     def inv_fn(x):
         """linear -> device"""
-        threshold = 0 if d is None else (a * d + b) ** g
         with np.errstate(invalid="ignore"):
             return np.where(
-                x >= threshold,
-                (x ** (1 / g) - b) / a,  # raises Warning for x < 0
-                (min(0, -b / a) if d is None else d),
+                x >= c,
+                ((x - c) ** (1 / g) - b) / a,  # raises Warning for x < 0
+                0,
             )
 
     return fn, inv_fn
@@ -250,6 +263,26 @@ def get_gamma_trc(g=2.4, a=1/1.055, b=0.055/1.055, c=1/12.92, d=0.04045):
                 (x ** (1 / g) - b) / a,  # raises Warning for y < 0
                 linear_slope * x,
             )
+
+    return fn, inv_fn
+
+
+def get_7p_trc(g, a, b, c, d, e, f):
+    def fn(x):
+        """device -> linear"""
+        return np.where(
+            x >= d,
+            np.power(np.maximum(a * x + b, 0.0), g) + e,
+            c * x + f,
+        )
+
+    def inv_fn(x):
+        """linear -> device"""
+        return np.where(
+            x >= c * d + f,
+            (np.maximum(x - e, 0.0) ** (1 / g) - b) / a,
+            (x - f) / c,
+        )
 
     return fn, inv_fn
 
@@ -351,14 +384,15 @@ def convert_to_srgb(array, input_icc_profile, exiftool_path, trcs=None):
     else:
         if trcs is None:
             # No TRCs found, construct one from converting a linear curve from input profile to sRGB
+            num_gridpoints = 256
             version = input_icc_profile.get('version', '2.0.0')
             srgb_profile = get_srgb_profile(version, exiftool_path)
-            xs = np.linspace(0, 1, 256)
+            xs = np.linspace(0, 1, num_gridpoints)
             xs_rgb = np.tile(xs[:, None, None], (1, 1, 3))  # (256, 1, 3)
-            ys_rgb = profile_to_profile(xs_rgb, input_icc_profile, srgb_profile).reshape(256, 3)
+            ys_rgb = profile_to_profile(xs_rgb, input_icc_profile, srgb_profile, lut_interpolation='tetrahedral').reshape(num_gridpoints, 3)
 
-            #np.savez("trcs.npz", xs=xs_rgb, ys=ys_rgb)
-            #print("DEBUG: saved input_profile -> sRGB TRCs to trcs.npz")
+            np.savez("trcs.npz", xs=xs_rgb, ys=ys_rgb)
+            print("DEBUG: saved input_profile -> sRGB TRCs to trcs.npz")
 
             def fn(x):
                 for c in range(3):
@@ -447,18 +481,26 @@ def convert_curve_profile(curve, input_icc_profile, working_profile):
     """
     curve = curve.reshape(1, 3, 256).transpose(2, 0, 1).astype(np.float64)
     grid_points = np.tile(np.linspace(0, 1, 256, dtype=np.float64)[:, None, None], (1, 1, 3))
-    print("Converting curve back from working to input profile...")
+    print(f"Converting curve back from working to input profile ({input_icc_profile['description']})...")
     print(f"DEBUG: curve stats before: {curve.dtype} {curve.min()} {curve.max()} {curve.mean()}")
-    #np.savez("trcs1.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
+    np.savez("trcs1.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
 
     curve_x_rgb = profile_to_profile(grid_points, working_profile, input_icc_profile)
+    print()
+    print("curve_y transform...")
     curve_y_rgb = profile_to_profile(curve, working_profile, input_icc_profile)
+    print("curve_y after transform:")
+    print(curve_y_rgb[::64, 0, :])
+    print()
 
     # Resample to grid points
     curve = np.stack([np.interp(grid_points[:, :, c], curve_x_rgb[:, 0, c], curve_y_rgb[:, 0, c]) for c in range(3)], axis=-1)
+    print("interpolated curve_y:")
+    print(curve[::64, 0, :])
+    print()
 
-    #print(f"DEBUG: curve stats after inv_trc: {curve.min()} {curve.max()} {curve.mean()}")
-    #np.savez("trcs2.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
+    print(f"DEBUG: curve stats after inv_trc: {curve.min()} {curve.max()} {curve.mean()}")
+    np.savez("trcs2.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
 
     return curve.transpose(1, 2, 0).reshape(1, 1, 768).astype(np.float32).clip(0, 1)
 
@@ -551,23 +593,24 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
         array: Converted pixel array
     """
     # disable for debugging
-    if output_icc_profile['description'] == input_icc_profile['description']:
-        return array
+    #if output_icc_profile['description'] == input_icc_profile['description']:
+    #    return array
 
-    # Check if conversion is possible with the two profiles
+    # Check if conversion is possible with the two profiles, establish ICC.1:2022 precedence.
+    # LUT-based ICC profile must support at least 'perceptual' rendering intent.
+    # CM/TRC profiles of the input/display class only support 'relative_colorimetric' rendering intent,
+    # but this implementation allows to overrule that by user input and by available LUT-based intents.
     if 'a2b' not in input_icc_profile and 'trcs' not in input_icc_profile:
-        print("Warning: input ICC profile has neither curves nor A2B data, skipping conversion")
-        return array
+        raise ValueError("source color profile has neither valid TRC nor A2B data, conversion impossible")
     if 'b2a' not in output_icc_profile and 'trcs' not in output_icc_profile:
-        print("Warning: output ICC profile has neither curves nor B2A data, skipping conversion")
-        return array
+        raise ValueError("target color profile has neither valid TRC nor B2A data, conversion impossible")
     intent_from_key = {
-        'AToB1': 'perceptual',
-        'AToB0': 'relative_colorimetric',
+        'AToB0': 'perceptual',
+        'AToB1': 'relative_colorimetric',
         'AToB2': 'saturation',
         'AToB3': 'absolute_colorimetric',
-        'BToA1': 'perceptual',
-        'BToA0': 'relative_colorimetric',
+        'BToA0': 'perceptual',
+        'BToA1': 'relative_colorimetric',
         'BToA2': 'saturation',
         'BToA3': 'absolute_colorimetric'
     }
@@ -593,12 +636,20 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
     elif 'a2b' in input_icc_profile:
         if rendering_intent not in available_input_intents:
             print(f"Warning: rendering intent '{rendering_intent}' not supported by input profile.")
-            rendering_intent = 'perceptual' if 'perceptual' in available_input_intents else available_input_intents.pop()
+            rendering_intent = (
+                # prefer intent compatible with input/display CM/TRC output_icc_profile
+                'relative_colorimetric' if 'relative_colorimetric' in available_input_intents else
+                'perceptual' if 'perceptual' in available_input_intents else
+                available_input_intents.pop())
             print(f"Using rendering intent: {rendering_intent}")
     elif 'b2a' in output_icc_profile:
         if rendering_intent not in available_output_intents:
             print(f"Warning: rendering intent '{rendering_intent}' not supported by output profile.")
-            rendering_intent = 'perceptual' if 'perceptual' in available_output_intents else available_output_intents.pop()
+            rendering_intent = (
+                # prefer intent compatible with input/display CM/TRC input_icc_profile
+                'relative_colorimetric' if 'relative_colorimetric' in available_output_intents else
+                'perceptual' if 'perceptual' in available_output_intents else
+                available_output_intents.pop())
             print(f"Using rendering intent: {rendering_intent}")
     #print(f"DEBUG: Using rendering intent: {rendering_intent}\n")
 
@@ -607,21 +658,27 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
     if 'a2b' in input_icc_profile:
         a2b_data = (
             input_icc_profile['a2b']['AToB0'] if rendering_intent == 'perceptual' else
-            input_icc_profile['a2b']['AToB1'] if rendering_intent.startswith('relative') else
+            input_icc_profile['a2b']['AToB1'] if rendering_intent == 'relative_colorimetric' else
             input_icc_profile['a2b']['AToB2'] if rendering_intent == 'saturation' else
-            input_icc_profile['a2b']['AToB3'] if rendering_intent.startswith('absolute') else
+            input_icc_profile['a2b']['AToB3'] if rendering_intent == 'absolute_colorimetric' else
             None
         )
     if 'b2a' in output_icc_profile:
         b2a_data = (
             output_icc_profile['b2a']['BToA0'] if rendering_intent == 'perceptual' else
-            output_icc_profile['b2a']['BToA1'] if rendering_intent.startswith('relative') else
+            output_icc_profile['b2a']['BToA1'] if rendering_intent == 'relative_colorimetric' else
             output_icc_profile['b2a']['BToA2'] if rendering_intent == 'saturation' else
-            output_icc_profile['b2a']['BToA3'] if rendering_intent.startswith('absolute') else
+            output_icc_profile['b2a']['BToA3'] if rendering_intent == 'absolute_colorimetric' else
             None
         )
 
-    # Prefer LUT over CM/TRC if both exist
+    if False:
+        # For debugging only: prefer CM/TRC over LUT
+        a2b_data = None if (input_icc_profile.get('cm') is not None and input_icc_profile.get('trcs') is not None) else a2b_data
+        b2a_data = None if (output_icc_profile.get('cm') is not None and output_icc_profile.get('trcs') is not None) else b2a_data
+        input_icc_profile['pcs'] = 'XYZ'
+
+    # Prefer LUT over CM/TRC if both exist (ICC.1:2022, chapter 8.10)
     source_cm = input_icc_profile.get('cm') if a2b_data is None else None
     source_trcs = input_icc_profile.get('trcs') if a2b_data is None else None
     target_cm = output_icc_profile.get('cm') if b2a_data is None else None
@@ -647,6 +704,7 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
     # Input color matrix
     if source_cm is not None:
         array = array @ source_cm
+        assert input_icc_profile['pcs'] == 'XYZ', f'UNEXPECTED: {input_icc_profile['description']} has TRC/CM and PCS {input_icc_profile['pcs']}'
         print("DEBUG: XYZ after input CM:")
         for c in range(3):
             print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
@@ -659,25 +717,43 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
                 array = array / _xyz_norm_scale(b2a_data['type'])
             elif output_icc_profile['pcs'] == 'Lab':
                 array = array / _xyz_norm_scale(b2a_data['type'])
-                #print(f"Divided array by {_xyz_norm_scale(b2a_data['type'])}")
-                #print(f"array has now a range of {array.min()} to {array.max()}")
+                print(f"Divided array by {_xyz_norm_scale(b2a_data['type'])}")
+                print(f"array has now a range of {array.min()} to {array.max()}")
             else:
                 raise ValueError("Unsupported PCS: {}".format(output_icc_profile['pcs']))
-            #print("DEBUG: XYZ after LUT-like normalization:")
-            #for c in range(3):
-            #    print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
+            print("DEBUG: XYZ after LUT-like normalization:")
+            for c in range(3):
+                print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
 
     # A2B
     if a2b_data is not None:
-        #print("DEBUG: array stats before A2B: min={:.4f}, max={:.4f}, mean={:.4f}".format(array.min(), array.max(), array.mean()))
+        print("DEBUG: array stats before A2B: min={:.4f}, max={:.4f}, mean={:.4f}".format(array.min(), array.max(), array.mean()))
         array = apply_a2b(array, a2b_data, lut_interpolation)
-        #print("DEBUG: XYZ stats after A2B:")
-        #for c in range(3):
-        #    print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
+        if input_icc_profile['pcs'] == 'Lab':
+            print("DEBUG: Lab stats after A2B:")
+            for c in range(3):
+                print(f"  {'Lab'[c]}: min={array[:, :, c].min():.4f}, max={array[:, :, c].max():.4f}, mean={array[:, :, c].mean():.4f}")
+        else:
+            print("DEBUG: XYZ stats after A2B:")
+            for c in range(3):
+                print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
+
+    # Compare PCS with profile type
+    if not b2a_data and output_icc_profile['pcs'] != 'XYZ':
+        print(f"WARNING: {output_icc_profile['description']} has CM/TRC (no B2A), but PCS is 'Lab' - probably this is wrong!")
+        if input_icc_profile['pcs'] == 'XYZ':
+            skip_pcs_conversion = True
+            force_pcs_conversion = False
+        else:
+            skip_pcs_conversion = False
+            force_pcs_conversion = True
+    else:
+        skip_pcs_conversion = False
+        force_pcs_conversion = False
 
     # Connection space conversion
-    if input_icc_profile['pcs'] != output_icc_profile['pcs']:
-        print("DEBUG: converting from {} to {}".format(input_icc_profile['pcs'], output_icc_profile['pcs']))
+    if force_pcs_conversion or (input_icc_profile['pcs'] != output_icc_profile['pcs'] and not skip_pcs_conversion):
+        print(f"DEBUG: converting from {input_icc_profile['pcs']} to {output_icc_profile['pcs']}")
         H, W, C = array.shape
         array = connect_pcs(
             array.reshape(-1, C),
@@ -686,19 +762,32 @@ def profile_to_profile(array, input_icc_profile, output_icc_profile, rendering_i
             src_lut_type = '' if a2b_data is None else a2b_data['type'],
             dst_lut_type = '' if b2a_data is None else b2a_data['type'],
         ).reshape(H, W, C)
-        print("DEBUG: Lab stats after PCS conversion:")
-        for c in range(3):
-            print(f"  {'Lab'[c]}: min={array[:, :, c].min():.4f}, max={array[:, :, c].max():.4f}, mean={array[:, :, c].mean():.4f}")
+        if output_icc_profile['pcs'] == 'Lab':
+            print("DEBUG: Lab stats after PCS conversion:")
+            for c in range(3):
+                print(f"  {'Lab'[c]}: min={array[:, :, c].min():.4f}, max={array[:, :, c].max():.4f}, mean={array[:, :, c].mean():.4f}")
+        else:
+            print("DEBUG: XYZ stats after PCS conversion:")
+            for c in range(3):
+                print("  Channel {}: min={:.4f}, max={:.4f}, mean={:.4f}".format(c, array[:, :, c].min(), array[:, :, c].max(), array[:, :, c].mean()))
 
     # Output color matrix
     if target_cm is not None:
         # Ensure LUT and CM/TRC-profile use the same XYZ normalization
         if a2b_data is not None:
             # Undo LUT normalisation → actual XYZ
-            #print(f"DEBUG: _xyz_norm_scale for type {a2b_data['type']}: {_xyz_norm_scale(a2b_data['type'])}")
+            print(f"DEBUG: multiplying with _xyz_norm_scale for type {a2b_data['type']}: {_xyz_norm_scale(a2b_data['type'])}")
             array = array * _xyz_norm_scale(a2b_data['type'])
 
-        inverse_output_cm = np.linalg.inv(target_cm)
+        try:
+            inverse_output_cm = np.linalg.inv(target_cm)
+        except np.linalg.LinAlgError as e:
+            from PIL import Image, ImageDraw
+            print(f'Error: {output_icc_profile['description']} has an invalid color matrix ({e})')
+            error_img = Image.new("RGB", array.shape[:2], "white")
+            draw = ImageDraw.Draw(error_img)
+            draw.text((10, 10), f"Error: ICC profile {output_icc_profile['description']} has an invalid color matrix", fill="black")
+            return np.array(error_img)
         array = array @ inverse_output_cm
         print("DEBUG: linear RGB after output CM:", array.dtype, array.min(), array.mean(), array.max())
 

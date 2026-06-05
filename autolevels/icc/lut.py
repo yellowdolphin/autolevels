@@ -393,7 +393,7 @@ def apply_a2b(pixels, a2b_data, lut_interpolation='linear'):
             p = apply_matrix(p, a2b_data['matrix'], bias=None)
         p = apply_clut(p, a2b_data['clut'], a2b_data['clut_grid_size'], lut_interpolation)
         p = apply_output_tables(p, a2b_data['output_tables'])
-        #print("DEBUG: value ranges after output tables: min={:.4f}, max={:.4f}, mean={:.4f}".format(p.min(), p.max(), p.mean()))
+        print("DEBUG: value ranges after output tables: min={:.4f}, max={:.4f}, mean={:.4f}".format(p.min(), p.max(), p.mean()))
 
     elif lut_type == 'mAB':
         # A → CLUT → M → Matrix → B
@@ -435,9 +435,9 @@ def _apply_1d_tables(p, tables):
         xp = np.linspace(0.0, 1.0, len(table))
         result[:, i] = np.interp(p[:, i], xp, table)
         # DEBUG
-        #xp_debug = np.linspace(0.0, 1.0, 11)
-        #print(f"channel {i} table: {[round(float(table[j]), 3) for j in [int(k / 10 * len(table)) for k in range(10)] + [-1]]}, "
-        #      f"interp: {[round(float(y), 3) for y in np.interp(xp_debug, xp, table)]}")
+        xp_debug = np.linspace(0.0, 1.0, 11)
+        print(f"channel {i} table: {[round(float(table[j]), 3) for j in [int(k / 10 * len(table)) for k in range(10)] + [-1]]}, "
+              f"interp: {[round(float(y), 3) for y in np.interp(xp_debug, xp, table)]}")
     return result
 
 
@@ -523,10 +523,10 @@ def apply_matrix(p, matrix, bias=None):
     if bias is not None:
         result = result + bias          # broadcast over N; avoids in-place alloc issue
     # DEBUG
-    #print("\napply_matrix:")
-    #print(matrix)
-    #print("\nbias:")
-    #print(bias)
+    print("\napply_matrix:")
+    print(matrix)
+    print("\nbias:")
+    print(bias)
     return result
 
 
