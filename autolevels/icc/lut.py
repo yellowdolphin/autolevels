@@ -110,7 +110,8 @@ def decode_lut(raw):
             else:
                 raise NotImplementedError(f"parametricCurveType function {fn_type}")
 
-            return np.clip(y, 0.0, 1.0)
+            #return np.clip(y, 0.0, 1.0)
+            return y  # lcms does not clip here
 
         else:
             raise ValueError(f"Unexpected curve tag '{tag_sig}' at offset {offset}")
@@ -393,7 +394,7 @@ def apply_a2b(pixels, a2b_data, lut_interpolation='linear'):
             p = apply_matrix(p, a2b_data['matrix'], bias=None)
         p = apply_clut(p, a2b_data['clut'], a2b_data['clut_grid_size'], lut_interpolation)
         p = apply_output_tables(p, a2b_data['output_tables'])
-        print("DEBUG: value ranges after output tables: min={:.4f}, max={:.4f}, mean={:.4f}".format(p.min(), p.max(), p.mean()))
+        #print("DEBUG: value ranges after output tables: min={:.4f}, max={:.4f}, mean={:.4f}".format(p.min(), p.max(), p.mean()))
 
     elif lut_type == 'mAB':
         # A → CLUT → M → Matrix → B
@@ -412,14 +413,17 @@ def apply_a2b(pixels, a2b_data, lut_interpolation='linear'):
         # B → Matrix → M → CLUT → A
         if a2b_data['b_curves'] is not None:
             p = apply_curves(p, a2b_data['b_curves'])
+            #print(f"after B curve: {p.min():.4f} {p.max():.4f}")
         if a2b_data['matrix'] is not None:
             p = apply_matrix(p, a2b_data['matrix'], a2b_data['matrix_bias'])
         if a2b_data['m_curves'] is not None:
             p = apply_curves(p, a2b_data['m_curves'])
+            #print(f"after M curve: {p.min():.4f} {p.max():.4f}")
         if a2b_data['clut'] is not None:
             p = apply_clut(p, a2b_data['clut'], a2b_data['clut_grid_points'], lut_interpolation)
         if a2b_data['a_curves'] is not None:
             p = apply_curves(p, a2b_data['a_curves'])
+            #print(f"after A curve: {p.min():.4f} {p.max():.4f}")
 
     else:
         raise NotImplementedError(f"Unknown LUT type: {lut_type!r}")
@@ -434,10 +438,6 @@ def _apply_1d_tables(p, tables):
     for i, table in enumerate(tables):
         xp = np.linspace(0.0, 1.0, len(table))
         result[:, i] = np.interp(p[:, i], xp, table)
-        # DEBUG
-        xp_debug = np.linspace(0.0, 1.0, 11)
-        print(f"channel {i} table: {[round(float(table[j]), 3) for j in [int(k / 10 * len(table)) for k in range(10)] + [-1]]}, "
-              f"interp: {[round(float(y), 3) for y in np.interp(xp_debug, xp, table)]}")
     return result
 
 
@@ -523,10 +523,11 @@ def apply_matrix(p, matrix, bias=None):
     if bias is not None:
         result = result + bias          # broadcast over N; avoids in-place alloc issue
     # DEBUG
-    print("\napply_matrix:")
-    print(matrix)
-    print("\nbias:")
-    print(bias)
+    #print("\napply_matrix:")
+    #print(matrix)
+    #print("\nbias:")
+    #print(bias)
+    #print(f"DEBUG: p after matrix: {p.min():.4f} {p.max():.4f}")
     return result
 
 
@@ -632,7 +633,9 @@ def apply_clut_scipy(p, clut, grid, order=1):
     clut_grid = clut.reshape(grid_points + [n_out])
 
     # Pixel coordinates in grid-index space, shape (n_in, N) as map_coordinates expects
-    coords = np.clip(p, 0.0, 1.0).T * (gp - 1.0)[:, np.newaxis]   # (n_in, N)
+    #coords = np.clip(p, 0.0, 1.0).T * (gp - 1.0)[:, np.newaxis]   # (n_in, N), clipping apparently not needed
+    #print(f"DEBUG: p before CLUT: {p.min():.4f} {p.max():.4f}")
+    coords = p.T * (gp - 1.0)[:, np.newaxis]   # (n_in, N)
 
     # One map_coordinates call per output channel
     result = np.empty((N, n_out), dtype=np.float64)
