@@ -9,7 +9,7 @@ description = "A tool for automatic photo enhancement using curve corrections."
 readme = "README.md"
 authors = [{name = "Marius Wanko", email = "marius.wanko@gmail.com"}]
 license = {text = "GPL-3.0"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "pillow",
@@ -20,7 +20,7 @@ dependencies = [
     "onnxruntime",
 ]
 classifiers = [
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
     "Topic :: Multimedia :: Graphics"

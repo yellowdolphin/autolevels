@@ -23,7 +23,7 @@ AutoLevels helps you fix these issues by letting you choose sensible target blac
 
 ## Installation
 
-Python 3.9 or later is required (avoid 3.14 until onnxruntime supports it or [install their nightly build](https://github.com/microsoft/onnxruntime/issues/26547)). On most Linux distributions, this is already pre-installed. Otherwise, download it from [Python.org](https://www.python.org/downloads/) or install it via your favourite app store. Make sure you mark the checkbox "Add Python executable to PATH". Then, to install AutoLevels, open a shell (cmd on Windows) and execute:
+Python 3.10 or later is required (avoid 3.14 until onnxruntime supports it or [install their nightly build](https://github.com/microsoft/onnxruntime/issues/26547)). On most Linux distributions, this is already pre-installed. Otherwise, download it from [Python.org](https://www.python.org/downloads/) or install it via your favourite app store. Make sure you mark the checkbox "Add Python executable to PATH". Then, to install AutoLevels, open a shell (cmd on Windows) and execute:
 
 ```bash
 pip install autolevels
@@ -61,7 +61,7 @@ To install ExifTool on Windows or MacOS, download the zip or pkg file from [http
 
 ### Windows 10
 
-The latest versions of onnxruntime don't support Windows 10. To use autolevels with automatic color correction on Windows 10, install Python version 3.13 or earlier (but not before version 3.9), then install autolevels (see above) and onnxruntime version 1.20.1:
+The latest versions of onnxruntime don't support Windows 10. To use autolevels with automatic color correction on Windows 10, install Python version 3.13 or earlier (but not before version 3.10), then install autolevels (see above) and onnxruntime version 1.20.1:
 
 ```bash
 pip install onnxruntime==1.20.1
