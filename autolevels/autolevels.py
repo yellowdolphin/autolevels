@@ -923,30 +923,27 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 pil_img.close()
                 continue
 
-            resized = cv2.resize(array, (384, 384)[::-1])  # uint16 or uint8
+            model_input = array.astype(np.float32) / maxvalue
+            model_input = cv2.resize(model_input, (384, 384)[::-1])
             input_profile_invertible = is_invertible(input_icc_profile, pil_img)
             if 'srgb' in input_icc_profile.name.lower() or model_space == 'none':
-                free_curve = model(resized)
+                free_curve = model(model_input)
             elif model_space == 'srgb' and input_profile_invertible:
                 srgb_profile = get_icc_profile('sRGB')
                 print(f"DEBUG: converting model input to {srgb_profile.name}")
-                resized = resized.astype(np.float32) / maxvalue
-                resized = profile_to_profile(resized, input_icc_profile, srgb_profile)
-                resized = (resized.clip(0, 1) * maxvalue).round().astype(np.uint8 if maxvalue == 255 else np.uint16)
-                #Image.fromarray(resized if maxvalue == 255 else (resized * (255 / 65535)).astype(np.uint8)).save('debug.png')
+                model_input = profile_to_profile(model_input, input_icc_profile, srgb_profile)
+                #Image.fromarray(model_input * 255).astype(np.uint8)).save('debug.png')
                 #print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
-                free_curve = model(resized)
+                free_curve = model(model_input)
                 free_curve = convert_curve_profile(free_curve, input_icc_profile, srgb_profile)
             elif model_space == 'gamma' or not input_profile_invertible:
                 print("DEBUG: adapting gamma of model input")
                 # Infer gamma of input_color_space
                 input_gamma = infer_gamma(input_icc_profile)
-                resized = resized.astype(np.float32) / maxvalue
-                resized = np.power(resized, input_gamma / 2.2)
-                resized = (resized * maxvalue).round().astype(np.uint8 if maxvalue == 255 else np.uint16)
-                #Image.fromarray(resized if maxvalue == 255 else (resized * (255 / 65535)).astype(np.uint8)).save('debug.png')
+                model_input = np.power(model_input, input_gamma / 2.2)
+                #Image.fromarray(model_input * 255).astype(np.uint8)).save('debug.png')
                 #print("DEBUG: wrote model input to debug.png")
-                free_curve = model(resized)
+                free_curve = model(model_input)
                 free_curve = convert_curve_gamma(free_curve, input_gamma)
             else:
                 raise ValueError(f"unknown model space adaptation: {model_space}")

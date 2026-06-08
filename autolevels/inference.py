@@ -24,9 +24,11 @@ def get_model(filename):
 
         def model(inputs):
             # channels-first, add batch dim, floatify
-            assert inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}, f'input type {inputs.dtype} not supported'
-            maxvalue = 65535 if inputs.dtype == np.uint16 else 255
-            inputs = torch.tensor(inputs.transpose(2, 0, 1)[None, ...], dtype=torch.float32) / maxvalue
+            if inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}:
+                maxvalue = 65535 if inputs.dtype == np.uint16 else 255
+                inputs = torch.tensor(inputs.transpose(2, 0, 1)[None, ...], dtype=torch.float32) / maxvalue
+            else:
+                inputs = torch.tensor(inputs.transpose(2, 0, 1)[None, ...], dtype=torch.float32)
             preds = np.array(scripted_model(inputs))
 
             # post-process preds
@@ -72,9 +74,11 @@ def get_model(filename):
 
         def model(inputs):
             # add batch dim, floatify
-            assert inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}, f'input type {inputs.dtype} not supported'
-            maxvalue = 65535 if inputs.dtype == np.dtype('uint16') else 255
-            inputs = tf.constant(inputs[None, ...], dtype=tf.float32) / maxvalue
+            if inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}:
+                maxvalue = 65535 if inputs.dtype == np.dtype('uint16') else 255
+                inputs = tf.constant(inputs[None, ...], dtype=tf.float32) / maxvalue
+            else:
+                inputs = tf.constant(inputs[None, ...], dtype=tf.float32)
             preds = tf_model.predict_on_batch(inputs)  # already returns numpy
 
             # post-process preds
@@ -93,9 +97,11 @@ def get_model(filename):
 
         def model(inputs):
             # channels-first, add batch dim, floatify
-            assert inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}, f'input type {inputs.dtype} not supported'
-            maxvalue = 65535 if inputs.dtype == np.uint16 else 255
-            inputs = inputs.transpose(2, 0, 1)[None, ...].astype(np.float32) / maxvalue
+            if inputs.dtype in {np.dtype('uint8'), np.dtype('uint16')}:
+                maxvalue = 65535 if inputs.dtype == np.uint16 else 255
+                inputs = inputs.transpose(2, 0, 1)[None, ...].astype(np.float32) / maxvalue
+            else:
+                inputs = inputs.transpose(2, 0, 1)[None, ...].astype(np.float32)
 
             preds = ort_sess.run(None, {'input': inputs})
 
@@ -160,6 +166,7 @@ def free_curve_map_image(img, curves):
                 hdf_file.create_dataset(dataset_name, data=curves, maxshape=(None, 256))
 
     # Upsample curves for uint16 images
+    #curves_original = curves.copy()
     if img.dtype == np.uint16:
         x_original = np.linspace(0, 1, 256)
         x_new = np.linspace(0, 1, 65536)
@@ -170,6 +177,13 @@ def free_curve_map_image(img, curves):
     # Map each channel using fancy indexing
     for i, curve in enumerate(curves):
         transformed[:, :, i] = curve[img[:, :, i]]
+
+    # Alternative: Direct Interpolation on float image
+    # This takes 2-5x longer than inference on large images, but still less than LUT conversion!
+    #maxvalue = 65535 if img.dtype == np.uint16 else 255
+    #a = img.astype(np.float32) / maxvalue
+    #for i, curve in enumerate(curves_original):
+    #    a[:, :, i] = np.interp(a[:, :, i], np.linspace(0, 1, 256), curve)
 
     # Remove channel dim from gray scale image
     if transformed.shape[2] == 1:

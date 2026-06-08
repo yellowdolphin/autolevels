@@ -430,7 +430,7 @@ def convert_curve_gamma(curve, gamma):
     curve = curve.reshape(1, 3, 256).transpose(2, 0, 1).astype(np.float64)
     grid_points = np.tile(np.linspace(0, 1, 256, dtype=np.float64)[:, None, None], (1, 1, 3))
 
-    print(f"Converting curve back from to input space with gamma {gamma}...")
+    print(f"Converting curve back to input space with gamma {gamma:.2f}")
     #print(f"DEBUG: curve stats before: {curve.dtype} {curve.min()} {curve.max()} {curve.mean()}")
     #np.savez("trcs1.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
 
@@ -453,25 +453,25 @@ def convert_curve_profile(curve, input_icc_profile, working_profile):
     curve = curve.reshape(1, 3, 256).transpose(2, 0, 1).astype(np.float64)
     grid_points = np.tile(np.linspace(0, 1, 256, dtype=np.float64)[:, None, None], (1, 1, 3))
     print(f"Converting curve back from working to input profile ({input_icc_profile.name})...")
-    print(f"DEBUG: curve stats before: {curve.dtype} {curve.min()} {curve.max()} {curve.mean()}")
-    np.savez("trcs1.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
+    #print(f"DEBUG: curve stats before: {curve.dtype} {curve.min()} {curve.max()} {curve.mean()}")
+    #np.savez("trcs1.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
 
     curve_x_rgb = profile_to_profile(grid_points, working_profile, input_icc_profile)
-    print()
-    print("curve_y transform...")
+    #print()
+    #print("curve_y transform...")
     curve_y_rgb = profile_to_profile(curve, working_profile, input_icc_profile)
-    print("curve_y after transform:")
-    print(curve_y_rgb[::64, 0, :])
-    print()
+    #print("curve_y after transform:")
+    #print(curve_y_rgb[::64, 0, :])
+    #print()
 
     # Resample to grid points
     curve = np.stack([np.interp(grid_points[:, :, c], curve_x_rgb[:, 0, c], curve_y_rgb[:, 0, c]) for c in range(3)], axis=-1)
-    print("interpolated curve_y:")
-    print(curve[::64, 0, :])
-    print()
+    #print("interpolated curve_y:")
+    #print(curve[::64, 0, :])
+    #print()
 
-    print(f"DEBUG: curve stats after inv_trc: {curve.min()} {curve.max()} {curve.mean()}")
-    np.savez("trcs2.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
+    #print(f"DEBUG: curve stats after inv_trc: {curve.min()} {curve.max()} {curve.mean()}")
+    #np.savez("trcs2.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
 
     return curve.transpose(1, 2, 0).reshape(1, 1, 768).astype(np.float32).clip(0, 1)
 
