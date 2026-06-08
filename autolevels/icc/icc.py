@@ -60,8 +60,13 @@ def inspect_icc_profile(data: bytes) -> dict:
     }
 
 
-def is_invertible(profile, pil_img):
-    """Check if ICC profile is invertible"""
+def get_invertible_intents(profile, pil_img):
+    """
+    Check if ICC profile supports PCS to device transform.
+
+    Returns a list of rendering intents supported in reverse conversion.
+    """
+    INTENTS = ['perceptual', 'relative_colorimetric', 'saturation', 'absolute_colorimetric']
     tags = inspect_icc_profile(profile)
     is_invertible = True
     if tags['pcs'] != 'XYZ' and not tags['BToA_tags']:
@@ -72,7 +77,15 @@ def is_invertible(profile, pil_img):
         grayscale = pil_img.mode == 'L' and 'kTRC' in tags.trc_tags
         if not (grayscale or (has_trcs and has_cm)):
             is_invertible = False
-    return is_invertible
+
+    if not is_invertible:
+        return []
+
+    if tags['BToA_tags']:
+        indices = [int(tag[3]) for tag in tags['BToA_tags']]
+        return [intent for i, intent in enumerate(INTENTS) if i in indices]
+    else:
+        return INTENTS
 
 
 def get_icc_version(data: bytes, return_dict: bool = False) -> str | dict:
@@ -446,7 +459,7 @@ def convert_curve_gamma(curve, gamma):
     return curve.transpose(1, 2, 0).reshape(1, 1, 768).astype(np.float32)
 
 
-def convert_curve_profile(curve, input_icc_profile, working_profile):
+def convert_curve_profile(curve, input_icc_profile, working_profile, rendering_intent):
     """
     Convert curve from working profile back to input ICC profile
     """
@@ -456,10 +469,10 @@ def convert_curve_profile(curve, input_icc_profile, working_profile):
     #print(f"DEBUG: curve stats before: {curve.dtype} {curve.min()} {curve.max()} {curve.mean()}")
     #np.savez("trcs1.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
 
-    curve_x_rgb = profile_to_profile(grid_points, working_profile, input_icc_profile)
+    curve_x_rgb = profile_to_profile(grid_points, working_profile, input_icc_profile, rendering_intent)
     #print()
     #print("curve_y transform...")
-    curve_y_rgb = profile_to_profile(curve, working_profile, input_icc_profile)
+    curve_y_rgb = profile_to_profile(curve, working_profile, input_icc_profile, rendering_intent)
     #print("curve_y after transform:")
     #print(curve_y_rgb[::64, 0, :])
     #print()
@@ -491,7 +504,7 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
                                     #flags="GAMUTCHECK,SOFTPROOFING",
                                     )
     except Exception as e:
-        print(f"conversion from {source_profile.name} to {target_profile.name} ({rendering_intent}) failed: {e}")
+        raise ValueError(f"Transform impossible from {source_profile.name} to {target_profile.name} ({rendering_intent}): {e}")
 
     try:
         array = transform.apply(np.ascontiguousarray(array))
@@ -499,5 +512,5 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
         return array
 
     except Exception as e:
-        print(f'lcms failed to transform from {source_profile.name} to {target_profile.name} '
+        raise ValueError(f'lcms2 failed to transform from {source_profile.name} to {target_profile.name} '
               f'({rendering_intent}, {dtype_suffix}): {e}')

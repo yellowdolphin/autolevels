@@ -15,7 +15,7 @@ import cv2
 from exiftool import ExifToolHelper
 from exiftool.exceptions import ExifToolExecuteError
 
-from autolevels.icc.icc import (get_icc_profile, is_invertible, profile_to_profile,
+from autolevels.icc.icc import (get_icc_profile, get_invertible_intents, profile_to_profile,
                                 infer_gamma, convert_curve_gamma, convert_curve_profile)
 
 
@@ -925,23 +925,26 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
             model_input = array.astype(np.float32) / maxvalue
             model_input = cv2.resize(model_input, (384, 384)[::-1])
-            input_profile_invertible = is_invertible(input_icc_profile, pil_img)
+            invertible_intents = get_invertible_intents(input_icc_profile, pil_img)
             if 'srgb' in input_icc_profile.name.lower() or model_space == 'none':
                 free_curve = model(model_input)
-            elif model_space == 'srgb' and input_profile_invertible:
+            elif model_space == 'srgb' and invertible_intents:
                 srgb_profile = get_icc_profile('sRGB')
-                print(f"DEBUG: converting model input to {srgb_profile.name}")
-                model_input = profile_to_profile(model_input, input_icc_profile, srgb_profile)
-                #Image.fromarray(model_input * 255).astype(np.uint8)).save('debug.png')
+                rendering_intent = (
+                    'relative_colorimetric' if 'relative_colorimetric' in invertible_intents else
+                    invertible_intents.pop())
+                print(f"Converting model input to {srgb_profile.name} ({rendering_intent})")
+                model_input = profile_to_profile(model_input, input_icc_profile, srgb_profile, rendering_intent)
+                #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save(f'{arg.outdir}/debug.png')
                 #print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
                 free_curve = model(model_input)
-                free_curve = convert_curve_profile(free_curve, input_icc_profile, srgb_profile)
-            elif model_space == 'gamma' or not input_profile_invertible:
+                free_curve = convert_curve_profile(free_curve, input_icc_profile, srgb_profile, rendering_intent)
+            elif model_space == 'gamma' or not invertible_intents:
                 print("DEBUG: adapting gamma of model input")
                 # Infer gamma of input_color_space
                 input_gamma = infer_gamma(input_icc_profile)
                 model_input = np.power(model_input, input_gamma / 2.2)
-                #Image.fromarray(model_input * 255).astype(np.uint8)).save('debug.png')
+                #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save('debug.png')
                 #print("DEBUG: wrote model input to debug.png")
                 free_curve = model(model_input)
                 free_curve = convert_curve_gamma(free_curve, input_gamma)
