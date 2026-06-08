@@ -78,7 +78,7 @@ def get_model(filename):
                 maxvalue = 65535 if inputs.dtype == np.dtype('uint16') else 255
                 inputs = tf.constant(inputs[None, ...], dtype=tf.float32) / maxvalue
             else:
-                inputs = tf.constant(inputs[None, ...], dtype=tf.float32)
+                inputs = tf.constant(inputs.clip(0, 1)[None, ...], dtype=tf.float32)
             preds = tf_model.predict_on_batch(inputs)  # already returns numpy
 
             # post-process preds
@@ -101,7 +101,7 @@ def get_model(filename):
                 maxvalue = 65535 if inputs.dtype == np.uint16 else 255
                 inputs = inputs.transpose(2, 0, 1)[None, ...].astype(np.float32) / maxvalue
             else:
-                inputs = inputs.transpose(2, 0, 1)[None, ...].astype(np.float32)
+                inputs = inputs.clip(0, 1).transpose(2, 0, 1)[None, ...].astype(np.float32)
 
             preds = ort_sess.run(None, {'input': inputs})
 
