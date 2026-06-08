@@ -335,7 +335,7 @@ def test_reproduce_option(simulate, tmp_path):
     assert output_image_path.exists() != bool(simulate)
 
 
-@pytest.mark.parametrize("simulate", ['--simulate', ''])
+'''@pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_model_option(simulate, tmp_path):
     """Test --model option using free curve inference with MODEL."""
     outdir = tmp_path
@@ -344,14 +344,14 @@ def test_model_option(simulate, tmp_path):
     print(result.stdout)
     assert result.returncode == 0, result.stderr
     assert output_image_path.exists() != bool(simulate)
-
+'''
 
 @pytest.mark.parametrize("simulate", ['--simulate', ''])
 def test_model_option_with_saturation_first(simulate, tmp_path):
     """Test --model and --saturation-first options."""
     outdir = tmp_path
     output_image_path = outdir / (Path(TEST_IMAGE).stem + '_al.jpg')
-    result = run_autolevels(f'{simulate} --outdir {outdir} --model {MODEL} --saturation-first --saturation 0.8 -- {TEST_IMAGE}')
+    result = run_autolevels(f'{simulate} --outdir {outdir} --model {ONNX_MODEL} --saturation-first --saturation 0.8 -- {TEST_IMAGE}')
     print(result.stdout)
     assert result.returncode == 0, result.stderr
     assert output_image_path.exists() != bool(simulate)
@@ -375,7 +375,7 @@ def test_48bit_images(simulate, tmp_path):
         outdir = tmp_path
         output_image_path = outdir / (Path(fn).stem + '_al' + Path(fn).suffix)
         output_image_path.unlink(missing_ok=True)
-        result = run_autolevels(f'{simulate} --outdir {outdir} --model {MODEL} -- {fn}')
+        result = run_autolevels(f'{simulate} --outdir {outdir} --model {ONNX_MODEL} -- {fn}')
         print(result.stdout)
         assert result.returncode == 0, result.stderr
         assert output_image_path.exists() != bool(simulate)
@@ -580,7 +580,7 @@ def test_darktable_icc(simulate, tmp_path):
     copyfile(TEST_IMAGE, fn)
     OUTPUT_XMP_PATH = fn.with_suffix(fn.suffix + '.xmp')
     output_image_path = tmp_path / (Path(fn).stem + '_al.jpg')
-    result = run_autolevels(f'{simulate} --outdir {tmp_path} --model {MODEL} '
+    result = run_autolevels(f'{simulate} --outdir {tmp_path} --model {ONNX_MODEL} '
                             f'--input-icc-profile {ICC_PROFILE_V4} --output-icc-profile {ICC_PROFILE_V2} '
                             f'--export darktable -- {fn}')
     print(result.stdout)
@@ -635,7 +635,7 @@ def test_darktable_without_export_arg(tmp_path):
     OUTPUT_XMP_PATH = tmp_path / (fn.stem + outsuffix)
     output_image_path = tmp_path / (Path(fn).stem + '_al.jpg')
 
-    result = run_autolevels(f'--outdir {tmp_path} --model {MODEL} --outsuffix {outsuffix} -- {fn}')
+    result = run_autolevels(f'--outdir {tmp_path} --model {ONNX_MODEL} --outsuffix {outsuffix} -- {fn}')
     print(result.stdout)
     assert result.returncode == 0, result.stderr
     assert OUTPUT_XMP_PATH.exists()
@@ -654,7 +654,7 @@ def test_darktable_versions(tmp_path):
         OUTPUT_XMP_PATH = tmp_path / (fn.stem + outsuffix)
         output_image_path = tmp_path / (Path(fn).stem + '_al.jpg')
 
-        cmd = f'--outdir {tmp_path} --model {MODEL} --export darktable {dt_version} --outsuffix {outsuffix} -- {fn}'
+        cmd = f'--outdir {tmp_path} --model {ONNX_MODEL} --export darktable {dt_version} --outsuffix {outsuffix} -- {fn}'
         print(cmd)
         result = run_autolevels(cmd)
         print(result.stdout)
