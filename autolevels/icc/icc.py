@@ -395,7 +395,7 @@ def infer_gamma(icc_profile):
 
     GAMMA_24_BUILTIN = {'ITU-R BT.709 Reference Display', 'ITU-R BT.2020 Reference Display'}
 
-    LINEAR_BUILTIN = {'linear RIMM RGB profile v4', 'Linear Rec709 RGB', 'Linear Rec2020 RGB'}
+    LINEAR_BUILTIN = {'Linear Rec709 RGB', 'Linear Rec2020 RGB'}
 
     if 'srgb' in icc_profile.name.lower():
         return 2.225
