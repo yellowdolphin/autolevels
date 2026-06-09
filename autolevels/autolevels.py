@@ -7,6 +7,7 @@ import sys
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+import re
 
 import numpy as np
 from PIL import Image, ImageFilter
@@ -292,6 +293,57 @@ def evaluate_fstring(s: str, x):
     # Safely format the string using str.format
     result = formatted_str.format(x)
     return result
+
+
+def next_free_path(folder: str | Path, stem: str, suf: str) -> Path:
+    """
+    Find the next free path in `folder` by incrementing the number in the suffix.
+
+    "?" in `suf` are replaced by a number of digits, and the next free number is returned.
+
+    Args:
+        folder (str | Path): Folder to search for the next free path
+        stem (str): Stem of the path
+        suf (str): Suffix of the path
+
+    Returns:
+        Path: The next free path
+    """
+    folder = Path(folder)
+
+    m = re.search(r"\?+", suf)
+    if not m:
+        path = folder / f"{stem}{suf}"
+        return path
+
+    q_start, q_end = m.span()
+    width = q_end - q_start
+
+    prefix = suf[:q_start]
+    suffix = suf[q_end:]
+
+    # Use * instead of ? so the glob catches numbers longer than `width` digits
+    glob_suf = f"{prefix}*{suffix}"
+
+    pattern = re.compile(
+        rf"^{re.escape(stem)}"
+        rf"{re.escape(prefix)}"
+        rf"(\d{{{width},}})"          # at least `width` digits
+        rf"{re.escape(suffix)}$"
+    )
+
+    max_num = -1
+
+    for path in folder.glob(f"{stem}{glob_suf}"):
+        m = pattern.match(path.name)
+        if m:
+            max_num = max(max_num, int(m.group(1)))
+
+    next_num = max_num + 1
+
+    return folder / (
+        f"{stem}{prefix}{next_num:0{width}d}{suffix}"
+    )
 
 
 def imread_unicode(fn, flags=cv2.COLOR_BGR2RGB, src_bytes=None):
@@ -843,8 +895,10 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 suf = arg.outsuffix or f'_al{ext}'
             if '.' not in suf:
                 suf += ext  # add missing extension
-            out_fn = (outdir or fn.parent) / f'{stem}{suf}'
-        # TODO: check out_fn exists, add option -f to overwrite
+            if '?' in suf:
+                out_fn = next_free_path(outdir or fn.parent, stem, suf)
+            else:
+                out_fn = (outdir or fn.parent) / f'{stem}{suf}'
 
         # Open image with PIL for metadata
         try:

@@ -1,5 +1,6 @@
 import pytest
 from autolevels import make_comment
+from autolevels.autolevels import next_free_path
 from autolevels.export import (fit_rgb_curves, compute_monotone_hermite_slopes, hermite_eval, create_basic_xmp, 
                                check_missing, append_rgbcurve_history_item, local_name, check_darktable_version)
 from autolevels import process_channel
@@ -192,6 +193,24 @@ def test_append_rgbcurve_history_item():
             assert li['params'] == "gz48eJzjZBgFowABWAbaAaNgwAEAMNgADg=="
 
     xmp_file.unlink()  # Clean up after test
+
+
+@pytest.mark.parametrize(
+    "existing, expected",
+    [
+        ([], "test_al0.jpg"),
+        (["test_al9.jpg"], "test_al10.jpg"),
+        (["test_al10.jpg"], "test_al11.jpg"),
+    ],
+)
+def test_next_free_path(tmp_path, existing, expected):
+    for name in existing:
+        (tmp_path / name).touch()
+
+    result = next_free_path(tmp_path, stem="test", suf="_al?.jpg")
+
+    assert result == tmp_path / expected
+    assert result.name not in existing
 
 
 def test_process_channel():
