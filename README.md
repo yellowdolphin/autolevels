@@ -40,7 +40,9 @@ This will also install the following requirements if not found:
 - numpy
 - pillow
 - pyexiftools
-- opencv-python
+- python-lcms2
+- imageio
+- tifffile
 - h5py
 - onnxruntime
 

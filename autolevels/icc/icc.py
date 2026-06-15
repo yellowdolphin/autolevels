@@ -4,6 +4,7 @@ from importlib import resources
 from PIL import Image
 import numpy as np
 import lcms2
+import imageio.v3 as iio
 
 
 TRC_TAGS = 'RedTRC', 'GreenTRC', 'BlueTRC', 'GrayTRC'
@@ -67,6 +68,9 @@ def get_invertible_intents(profile, pil_img):
     Returns a list of rendering intents supported in reverse conversion.
     """
     INTENTS = ['perceptual', 'relative_colorimetric', 'saturation', 'absolute_colorimetric']
+    if 'XYZ' in profile.name:
+        # lcms2 can handle XYZ in both directions without matching tags
+        return INTENTS
     tags = inspect_icc_profile(profile)
     is_invertible = True
     if tags['pcs'] != 'XYZ' and not tags['BToA_tags']:
@@ -129,8 +133,13 @@ def get_icc_profile(path):
             return None
     elif Path(path).is_file():
         # Extract ICC bytes embedded in image files, lcms can't read those
-        with Image.open(path) as img:
-            icc_bytes = img.info.get("icc_profile")
+        try:
+            with Image.open(path) as img:
+                icc_bytes = img.info.get("icc_profile")
+        except Exception:
+            # If PIL fails to open the image, try ImageIO
+            meta = iio.immeta(path)
+            icc_bytes = meta.get("icc_profile")
         if not icc_bytes:
             return None
         profile = lcms2.Profile(buffer=icc_bytes)

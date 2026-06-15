@@ -12,7 +12,7 @@ import re
 import numpy as np
 from PIL import Image, ImageFilter
 
-import cv2
+import imageio.v3 as iio
 from exiftool import ExifToolHelper
 from exiftool.exceptions import ExifToolExecuteError
 
@@ -346,75 +346,6 @@ def next_free_path(folder: str | Path, stem: str, suf: str) -> Path:
     )
 
 
-def imread_unicode(fn, flags=cv2.COLOR_BGR2RGB, src_bytes=None):
-    """Unicode-safe cv2.imread replacement.
-
-    Args:
-        fn (str | Path): File name or Path
-        flags (int, optional): OpenCV flags for image decoding. Default: cv2.COLOR_BGR2RGB
-        src_bytes (bytes, optional): Bytes object with pixel data. Default: None
-
-    Returns:
-        np.ndarray: Decoded image array or str: Error message
-
-    Handles all known errors, supports 16-bit images.
-    """
-    # The bytes object for decoding is always uint8, regardless of pixel depth
-    if src_bytes is None:
-        try:
-            src_bytes = Path(fn).read_bytes()
-        except Exception as e:
-            return f"Could not read {fn}: {e}"
-    array = np.frombuffer(src_bytes, np.uint8)
-
-    if len(array) == 0:
-        return f"{fn} is an empty file, no image data found"
-
-    # Decode image and convert to RGB
-    array = cv2.imdecode(array, cv2.IMREAD_UNCHANGED)
-
-    if array is None:
-        return f"cv2 could not decode {fn}"
-    try:
-        array = cv2.cvtColor(array, flags)
-    except ValueError as e:
-        return f"cv2 could not convert {fn} to RGB: {e}"
-    return array
-
-
-def imwrite_unicode(path, array, default_ext='.jpeg', params=None):
-    """
-    Unicode-safe replacement for cv2.imwrite().
-
-    Args:
-        path (str | Path): File name or Path
-        array (np.ndarray): Image array
-        default_ext (str, optional): File extension if path has no suffix. Default: '.jpeg'
-        params (list, optional): OpenCV parameters for image encoding. Default: None
-
-    Returns:
-        bool: True if successful, False otherwise
-
-    Works for any filename (UTF-8), and supports 8-bit and 16-bit images.
-    """
-    ext = Path(path).suffix or default_ext
-
-    # Encode via OpenCV → returns a uint8 buffer containing PNG/JPEG/TIFF/etc. file bytes
-    array = cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
-    success, encoded = cv2.imencode(ext, array, params or [])
-    if not success:
-        print(f"Could not encode {path}")
-        return False
-
-    # Write encoded bytes using Python’s Unicode-aware file I/O
-    try:
-        Path(path).write_bytes(encoded.tobytes())
-    except Exception as e:
-        print(f"Could not write {path}: {e}")
-        return False
-    return True
-
-
 def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
                       input_icc_profile, output_icc_profile):
     """
@@ -669,7 +600,7 @@ def get_out_format(filename, pil_img):
     """Infer format from filename extension or use input format"""
     ext = Path(filename).suffix.lower()
     pil_extensions = Image.registered_extensions()
-    return pil_extensions.get(ext, pil_img.format)
+    return pil_extensions.get(ext, pil_img.format if pil_img else 'JPEG')
 
 
 def estimate_jpeg_quality(pil_img):
@@ -902,27 +833,40 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
         # Open image with PIL for metadata
         try:
-            # This should work with file names, BytesIO, and streamlit.UploadedFile objects
+            # This works with file names, BytesIO, and streamlit.UploadedFile objects
+            # TODO: extract all metadata here, use context manager, use iio.readmeta
             pil_img = Image.open(fn if (images is None) else BytesIO(images[i]))
         except Exception as e:
-            print(f'Error: skipping {fn}, {e}')
-            if callback is not None:
-                callback(str(fn), False, 'unsupported or corrupt image format - skipping')
-            if len(fns) == 1:
-                # Return if this was the only file to process and it failed.
-                if 'pil_img' in locals():
-                    pil_img.close()
-                return f'Unsupported or corrupt image format: {fn}'
-            continue
+            # PIL cannot handle XYZ, Lab
+            print(f'PIL could not open {fn}: {e}')
+            pil_img = None
         out_format = get_out_format(out_fn, pil_img)
 
-        # Open/decode image with cv2 to get actual pixel array
+        # Open/decode image with ImageIO to get actual pixel array
         if images is not None:
-            # Unpack streamlit.UploadedFile for cv2 with unknown bit-depth
-            array = imread_unicode(fn, src_bytes=BytesIO(images[i]).read())
+            array = iio.imread(BytesIO(images[i]))
         else:
-            array = imread_unicode(fn)
-        maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255
+            try:
+                if fn.suffix.lower() == '.png':
+                    array = iio.imread(fn, plugin='PNG-FI')  # load RGB16 correctly
+                    #array = iio.imread(fn, plugin='opencv', flags=-1)[:, :, ::-1]  # load RGB16 correctly
+                else:
+                    array = iio.imread(fn)
+            except ValueError as e:
+                print(f"ImageIO: {e}, using PIL instead.")
+                if pil_img:
+                    # Fallback: decode image using PIL
+                    #array = np.asarray(pil_img)  # np.array/np.asarray closes pil_img!
+                    array = np.array(Image.open(fn))
+                else:
+                    if callback is not None:
+                        callback(str(fn), False, 'unsupported or corrupt image format - skipping')
+                    if len(fns) == 1:
+                        # Return if this was the only file to process and it failed.
+                        return f'Unsupported or corrupt image format: {fn}'
+                    continue
+
+        maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255 if array.dtype == np.dtype('uint8') else 1
 
         # Get ICC profile from input file if no global ICC file was specified, fallback: sRGB
         input_icc_profile = arg.input_icc_profile or get_icc_profile(fn) or get_icc_profile('sRGB')
@@ -977,11 +921,29 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 pil_img.close()
                 continue
 
-            model_input = array.astype(np.float32) / maxvalue
-            model_input = cv2.resize(model_input, (384, 384)[::-1])
+            # Resize and floatify model input
+            # TODO: improve RGB16 by using channel-wise 16-bit resize instead of PIL's 8-bit downconversion
+            try:
+                model_input = np.asarray(pil_img.resize((384, 384)[::-1], resample=Image.Resampling.NEAREST))
+            except RuntimeError:
+                print(f"DEBUG: PIL could not decode {fn}, using ImageIO")
+                model_input = np.asarray(Image.fromarray(array).resize((384, 384)[::-1], resample=Image.Resampling.NEAREST))
+            # print(f"{pil_img.mode} {model_input.dtype} {maxvalue}")
+            model_input = model_input.astype(np.float32) / (255 if model_input.dtype == np.uint8 else 65535)  # may differ from maxvalue
+
+            # Convert grayscale to RGB
+            if model_input.ndim == 2:
+                is_grayscale = True
+                model_input = np.tile(model_input[:, :, None], (1, 1, 3))
+            else:
+                is_grayscale = False
+            print(f"model_input: {model_input.shape} {model_input.dtype} {model_input.max()}")
             invertible_intents = get_invertible_intents(input_icc_profile, pil_img)
-            if 'srgb' in input_icc_profile.name.lower() or model_space == 'none':
+            print(f"DEBUG: invertible_intents: {invertible_intents}")
+            if 'sRGB' in input_icc_profile.name or model_space == 'none':
                 free_curve = model(model_input)
+                #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save(f'{arg.outdir}/debug.png')
+                #print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
             elif model_space == 'srgb' and invertible_intents:
                 srgb_profile = get_icc_profile('sRGB')
                 rendering_intent = (
@@ -1004,6 +966,10 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 free_curve = convert_curve_gamma(free_curve, input_gamma)
             else:
                 raise ValueError(f"unknown model space adaptation: {model_space}")
+
+            # Keep gray images gray
+            if is_grayscale:
+                free_curve = np.tile(free_curve.reshape(1, 3, 256).mean(axis=1, keepdims=True), (1, 1, 3))
 
             # Export curves to supported programs
             if arg.export == 'darktable' or out_fn.suffix.endswith('.xmp'):
@@ -1116,11 +1082,29 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             print(f"Converting image from {input_icc_profile.name} to {output_icc_profile.name}")
             array = profile_to_profile(array, input_icc_profile, output_icc_profile, arg.rendering_intent)
 
-        kwargs = {}  # TODO: allow user to set save options, fill kwargs accordingly for cv2/PIL
+        kwargs = {}  # TODO: allow user to set save options, fill kwargs accordingly for ImageIO/PIL
         if out_48bit:
-            # Quantize to 16-bit
-            array = (array * 65535).round().clip(0, 65535).astype('uint16')
-            imwrite_unicode(out_fn, array, default_ext='.png')
+            if not ('XYZ' in output_icc_profile.name or 'Lab' in output_icc_profile.name):
+                # Quantize to 16-bit
+                print(array.dtype, array.shape, array.min(), array.max())
+                array = (array * 65535).round().clip(0, 65535).astype('uint16')
+            if out_format == 'PNG':
+                # ImageIO by default cannot save 48-bit PNG (employs PIL for PNG). 2 Options:
+                # (A) opencv plugin: 50 MB extra package size for cv2, loads/saves reasonably fast
+                # iio.imwrite(out_fn, array, plugin='opencv')  # 295 ms
+
+                # (B) freeimage plugin: 8x slower (compression=6) or 10% larger file (compression=1)
+                import imageio
+                imageio.plugins.freeimage.download()  # once to install the lib
+                iio.imwrite(out_fn, array, plugin='PNG-FI', compression=6)  # 995 ms
+            elif out_format == 'TIFF':
+                iio.imwrite(out_fn, array, plugin='tifffile', compression="zlib", compressionargs={'level': 3}, predictor=True)
+            else:
+                try:
+                    iio.imwrite(out_fn, array)
+                except TypeError as e:
+                    print(f"ImageIO: {e}")
+                    print(array.dtype, array.shape, array.min(), array.max())
         else:
             # Quantize to 8-bit, continue with PIL Image
             array = (array * 255).round().clip(0, 255).astype('uint8')

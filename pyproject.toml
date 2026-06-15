@@ -15,7 +15,8 @@ dependencies = [
     "pillow",
     "pyexiftool",
     "python-lcms2",
-    "opencv-python",
+    "imageio",
+    "tifffile",
     "h5py",
     "onnxruntime",
 ]

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from PIL import Image
 import numpy as np
-import cv2
+import imageio.v3 as iio
 import exiftool
 
 
@@ -25,8 +25,10 @@ image_data = np.array([
 # Save 48bit image as PNG and TIFF
 PNG_IMAGE = "images/48bit_rgb.png"
 TIFF_IMAGE = "images/48bit_rgb.tiff"
-cv2.imwrite(PNG_IMAGE, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
-cv2.imwrite(TIFF_IMAGE, cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR))
+import imageio
+imageio.plugins.freeimage.download()  # once to install the lib
+iio.imwrite(PNG_IMAGE, image_data, plugin='PNG-FI', compression=6)
+iio.imwrite(TIFF_IMAGE, image_data, plugin='tifffile', compression="zlib", compressionargs={'level': 3}, predictor=True)
 
 # Images with ICC and MakerNote
 JPEG_WITH_ICC_MAKERNOTE = "images/adobeRGB.jpg"
