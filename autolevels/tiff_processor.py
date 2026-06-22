@@ -163,7 +163,7 @@ Root cause: exiftool -tagsfromfile with -all:all or -EXIF:all rewrites
 the entire IFD, collapsing multi-strip JPEG into a single strip and
 corrupting StripOffsets/StripByteCounts.
 
-This script uses a binary append strategy:
+This module uses a binary append strategy:
   1. The entire target file is kept unchanged (image strips stay at original offsets)
   2. Metadata blobs from source are appended at the end
   3. A new IFD0 is appended, pointing to both original structural data AND new metadata
@@ -381,7 +381,7 @@ def transfer_metadata_tiff2tiff(source_path, target_path, output_path):
 
 def verify_tiff_image(fn, reference=None, strict=False):
     """
-    Return True if the TIFF image is valid, False otherwise.
+    Return True if the TIFF file is valid, False otherwise.
 
     Args:
         fn: Path to the TIFF file to verify
@@ -445,9 +445,9 @@ def exiftool_safe_transfer(src, dst, icc_args, exiftool_path=None):
             shutil.copy2(dst, tmp)
             transfer_metadata_tiff2tiff(str(src), str(dst), str(tmp))
 
-        if verify_tiff_image(tmp, reference=src, strict=True):
-            shutil.move(tmp, dst)
-            return True
+            if verify_tiff_image(tmp, reference=src, strict=True):
+                shutil.move(tmp, dst)
+                return True
 
         # Try with exiftools
         args = [
@@ -473,12 +473,17 @@ def exiftool_safe_transfer(src, dst, icc_args, exiftool_path=None):
             # prevents file corruption in some cases
             # but also excludes all its subgroups: ExifIFD, GlobParamIFD,
             # GPS, IFD1, InteropIFD, MakerNotes, PrintIM and SubIFD.
+            # print("verification failed after normal exiftool call, adding --IFD0:all")
             shutil.copy2(dst, tmp)
             args.insert(-1, '--IFD0:all')
+            res = et.execute(*[a.encode() for a in args])  # slow
 
             if verify_tiff_image(tmp, reference=src, strict=True):
                 shutil.move(tmp, dst)
                 return True
+
+            tmp.unlink(missing_ok=True)
+            # print("verification failed again")
 
     except Exception as e:
         tmp.unlink(missing_ok=True)

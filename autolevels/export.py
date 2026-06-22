@@ -424,17 +424,16 @@ def check_missing(xmp_file):
     return missing, str(max_num + 1), str(history_end)
 
 
-def create_basic_xmp(xmp_file, pil_img):
+def create_basic_xmp(xmp_file, input_path, exif):
     if xmp_file.exists():
         return
-    derived_from = Path(pil_img.filename).name
+    derived_from = input_path.name
     import_timestamp = unix_to_year1_microseconds()
 
     # Get exif:DateTimeOriginal as naive or UTC datetime from exif or mtime
-    exif = pil_img.getexif()
     date_time_original = exif.get(306, None)
     # print("DEBUG datetime from exif:", date_time_original)
-    mtime = Path(pil_img.filename).stat().st_mtime  # float, OS-agnostic
+    mtime = input_path.stat().st_mtime  # float, OS-agnostic
     mtime_str = datetime.fromtimestamp(mtime, timezone.utc).strftime("%Y:%m:%d %H:%M:%S.%f")[:-3]
     # print("DEBUG datetime from mtime:", mtime_str)
     date_time_original = date_time_original or mtime_str
@@ -484,7 +483,7 @@ def darktable_change_timestamp_fixed(darktable_version):
     return True
 
 
-def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc_path=None, new_xmp_file=None, export_version=None):
+def append_rgbcurve_history_item(xmp_file, curves, input_path, exif, icc_profile, new_xmp_file=None, export_version=None):
     """
     Append a new RGB curve history item to the XMP file.
 
@@ -500,21 +499,30 @@ def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc_path=None, new_x
     params = pack_rgbcurve_params(splines)
 
     if not xmp_file.exists():
-        create_basic_xmp(xmp_file, pil_img)
+        create_basic_xmp(xmp_file, input_path, exif)
 
     # Python's xml.ElementTree does not preserve prefixes, namespace declarations, etc.
     # Hence, let's parse the XMP file manually.
 
     # Define missing history items when auto_presets_applied is "0" (JPEG image, not opened in darkroom)
-    embedded_profile, profile_name = get_embedded_profile(pil_img)
-    has_embedded_profile = embedded_profile is not None
-    # print("Color Space:", profile_name, "Embedded profile:", has_embedded_profile)
-    if has_embedded_profile:
+    # TODO: handle ICC-file paths, other image file paths, other builtins, etc. after merging with rawpy branch
+    profile_name = icc_profile.name
+    use_embedded_profile = input_path.samefile(icc_profile.path)
+
+    if use_embedded_profile:
+        icc_path = None
+    elif icc_profile.name == 'sRGB built-in':
+        icc_path = None
+    elif icc_profile.path.suffix.lower() in {'.icc', '.icm'}:
+        icc_path = icc_profile.path
+    else:
+        raise NotImplementedError("embedded ICC profiles not yet implemented in darktable XMP export")
+
+    if use_embedded_profile:
         # Embedded color profile
         colorin_params = 'gz48eJzjZBgFowABWAbaAaNgwAEAMNgADg=='
         history_basic_hash = '02d4cdbda625305c5e181669466f51d2'
-    elif profile_name == 'Adobe RGB':
-        # Adobe RGB
+    elif 'Adobe RGB' in profile_name:
         colorin_params = 'gz48eJxjYhgFowABWAbaAaNgwAEAFEwABw=='
         history_basic_hash = '0f9b5fb92690a1db2a86cc1fe367bf5d'
     else:
@@ -651,6 +659,7 @@ def append_rgbcurve_history_item(xmp_file, curves, pil_img, icc_path=None, new_x
                 continue
 
             elif icc_path and in_colorin and line.strip().startswith('darktable:params='):
+                print(f"DEBUG: icc_path: {icc_path}")
                 assert 'auto_presets' not in missing, 'found colorin despite missing auto_presets'
                 colorin_params = line.strip().split('params=')[1].replace('"', '')
                 colorin_params = update_colorin_params(colorin_params, icc_path)

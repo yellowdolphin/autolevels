@@ -3,6 +3,7 @@ from autolevels import make_comment
 from autolevels.autolevels import next_free_path
 from autolevels.export import (fit_rgb_curves, compute_monotone_hermite_slopes, hermite_eval, create_basic_xmp, 
                                check_missing, append_rgbcurve_history_item, local_name, check_darktable_version)
+from autolevels.icc.icc import get_icc_profile
 from autolevels import process_channel
 from PIL import Image
 import numpy as np
@@ -32,7 +33,7 @@ def test_make_comment():
 
 def test_make_comment_with_no_existing_comment(minimal_image):
     cli_params = "--example"
-    result = make_comment(minimal_image, RANDOM_VERSION, cli_params)
+    result = make_comment(minimal_image.info, RANDOM_VERSION, cli_params)
 
     assert result == f"autolevels {RANDOM_VERSION}, params: --example"
 
@@ -41,7 +42,7 @@ def test_make_comment_with_existing_comment(minimal_image):
     minimal_image.info['comment'] = b"Existing comment"
 
     cli_params = "--example"
-    result = make_comment(minimal_image, RANDOM_VERSION, cli_params)
+    result = make_comment(minimal_image.info, RANDOM_VERSION, cli_params)
 
     assert result == f"Existing comment\nautolevels {RANDOM_VERSION}, params: --example"
 
@@ -50,7 +51,7 @@ def test_make_comment_with_non_decodable_comment(minimal_image):
     minimal_image.info['comment'] = b"\x80\x81\x82"
 
     cli_params = "--example"
-    result = make_comment(minimal_image, RANDOM_VERSION, cli_params)
+    result = make_comment(minimal_image.info, RANDOM_VERSION, cli_params)
 
     assert result == f"autolevels {RANDOM_VERSION}, params: --example"
 
@@ -95,7 +96,9 @@ def test_create_basic_xmp_writes_file(tmp_path):
     xmp_file = tmp_path / "test.xmp"
 
     with Image.open("images/lübeck.jpg") as pil_img:
-        create_basic_xmp(xmp_file, pil_img)
+        input_path = Path(pil_img.filename)
+        exif = pil_img.getexif()
+        create_basic_xmp(xmp_file, input_path, exif)
 
         assert xmp_file.exists()
 
@@ -120,7 +123,10 @@ def test_create_basic_xmp_writes_file(tmp_path):
 
         # Test append_rgbcurve_history_item() using created basic XMP file
         support, curves = get_support_curves()
-        append_rgbcurve_history_item(xmp_file, curves, pil_img, icc_path=None, new_xmp_file=None, export_version='5.4')
+        icc_profile = get_icc_profile('sRGB')
+        print(icc_profile.name)
+        append_rgbcurve_history_item(xmp_file, curves, input_path=input_path, exif=exif, icc_profile=icc_profile, new_xmp_file=None, 
+                                     export_version='5.4')
 
     # Verify content of final XMP
     tree = ET.parse(xmp_file)
@@ -151,6 +157,18 @@ def test_create_basic_xmp_writes_file(tmp_path):
 
     xmp_file.unlink()  # Clean up after test
 
+    # Test with Adobe RGB icc file
+    icc_profile = get_icc_profile('autolevels/data/Adobe_RGB_1998.icc')
+    assert icc_profile.path.exists()
+    append_rgbcurve_history_item(xmp_file, curves, input_path=input_path, exif=exif, icc_profile=icc_profile, new_xmp_file=None, export_version='5.4')
+    tree = ET.parse(xmp_file)
+    root = tree.getroot()
+    description = root.find('.//rdf:Description', namespaces)
+    assert description.get('{http://darktable.sf.net/}history_basic_hash') == '0f9b5fb92690a1db2a86cc1fe367bf5d'
+
+    xmp_file.unlink()  # Clean up after test
+
+
 
 def test_check_darktable_version():
     with pytest.raises(ValueError):
@@ -168,7 +186,10 @@ def test_append_rgbcurve_history_item():
 
     with Image.open("images/adobeRGB.jpg") as pil_img:
         support, curves = get_support_curves()
-        append_rgbcurve_history_item(xmp_file, curves, pil_img, icc_path=None, new_xmp_file=None)
+        exif = pil_img.getexif()
+        input_path = Path(pil_img.filename)
+        embedded_profile = get_icc_profile(input_path)
+        append_rgbcurve_history_item(xmp_file, curves, input_path=input_path, exif=exif, icc_profile=embedded_profile, new_xmp_file=None)
 
     # Verify content of final XMP
     tree = ET.parse(xmp_file)

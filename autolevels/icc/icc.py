@@ -61,25 +61,28 @@ def inspect_icc_profile(data: bytes) -> dict:
     }
 
 
-def get_invertible_intents(profile, pil_img):
+def get_invertible_intents(profile, is_grayscale):
     """
     Check if ICC profile supports PCS to device transform.
 
     Returns a list of rendering intents supported in reverse conversion.
     """
     INTENTS = ['perceptual', 'relative_colorimetric', 'saturation', 'absolute_colorimetric']
-    if 'XYZ' in profile.name:
-        # lcms2 can handle XYZ in both directions without matching tags
+    tags = profile.tags if hasattr(profile, 'tags') else inspect_icc_profile(profile)
+
+    if tags['color_space'] in {'XYZ', 'Lab'}:
+        # lcms2 can handle XYZ and Lab in both directions without matching tags
+        print(f"WARNING: ICC profile {profile.name} has {tags['color_space']} color space")
         return INTENTS
-    tags = inspect_icc_profile(profile)
+
     is_invertible = True
     if tags['pcs'] != 'XYZ' and not tags['BToA_tags']:
         is_invertible = False
     if not tags['BToA_tags']:
         has_trcs = all(f'{x}TRC' in tags['trc_tags'] for x in 'rgb')
         has_cm = all(f'{x}XYZ' in tags['cm_tags'] for x in 'rgb')
-        grayscale = pil_img.mode == 'L' and 'kTRC' in tags.trc_tags
-        if not (grayscale or (has_trcs and has_cm)):
+        gray_conversion_possible = is_grayscale and 'kTRC' in tags['trc_tags']
+        if not (gray_conversion_possible or (has_trcs and has_cm)):
             is_invertible = False
 
     if not is_invertible:
@@ -116,8 +119,11 @@ def get_icc_version(data: bytes, return_dict: bool = False) -> str | dict:
     } if return_dict else f"{major}.{minor}.{patch}"
 
 
-def get_icc_profile(path):
+def get_icc_profile(path, add_tags=False):
     """Read ICC_Profile parameters from image or ICC files
+
+    Parameters:
+        add_tags (bool): assigns tags attribute to ICC header tags
 
     Returns:
         lcms2.Profile
@@ -127,6 +133,8 @@ def get_icc_profile(path):
             profile = lcms2.Profile(filename=str(path))
             assert profile is not None
             profile.path = Path(path)
+            if add_tags:
+                profile.tags = inspect_icc_profile(profile.to_bytes())
             return profile
         except Exception as e:
             print(f"could not read valid ICC profile from {path} ({e})")
@@ -137,13 +145,17 @@ def get_icc_profile(path):
             with Image.open(path) as img:
                 icc_bytes = img.info.get("icc_profile")
         except Exception:
-            # If PIL fails to open the image, try ImageIO
-            meta = iio.immeta(path)
-            icc_bytes = meta.get("icc_profile")
+            # If PIL fails to open the image, use tifffile (ony TIFF supports RGB_FLT)
+            from tifffile import TiffFile
+            with TiffFile(path) as tif:
+                icc_tag = tif.pages[0].tags.get(34675)
+                icc_bytes = icc_tag.value if icc_tag is not None else None
         if not icc_bytes:
             return None
         profile = lcms2.Profile(buffer=icc_bytes)
         profile.path = Path(path)
+        if add_tags:
+            profile.tags = inspect_icc_profile(icc_bytes)
         return profile
     else:
         # Try if this is a builtin profile name
@@ -168,12 +180,17 @@ def get_icc_profile(path):
             if profile.name == 'RGB built-in':
                 profile.name = path
 
+            if add_tags:
+                profile.tags = inspect_icc_profile(profile.to_bytes())
+
             return profile
         except Exception as e:
             # Not lcms2-builtin, but autolevels-builtin
             if resource_path.is_file():
                 profile = lcms2.Profile(filename=str(resource_path))
                 profile.path = resource_path
+                if add_tags:
+                    profile.tags = inspect_icc_profile(profile.to_bytes())
                 return profile
             print(f"lcms2 error: {e}")
             return None
@@ -499,13 +516,37 @@ def convert_curve_profile(curve, input_icc_profile, working_profile, rendering_i
 
 
 def profile_to_profile(array, source_profile, target_profile, rendering_intent='perceptual'):
-    def prefix(profile):
-        return (
-            'Lab' if profile.name == 'Lab identity built-in' else
-            'XYZ' if profile.name == 'XYZ identity built-in' else
-            'RGB')
+    """Convert image data from one color profile to another using lcms2.
 
-    dtype_suffix = 'FLT' if array.dtype == np.float32 else 'DBL'
+    Args:
+        array: Input image data as a numpy array
+            Supported dtypes: float16, float32, float64.
+        source_profile: Source ICC color profile object with a 'tags' attribute
+            containing 'color_space' information.
+        target_profile: Target ICC color profile object with a 'tags' attribute
+            containing 'color_space' information.
+        rendering_intent: Rendering intent for the color transformation.
+
+    Returns:
+        numpy.ndarray: The color-transformed array with the same shape as input.
+
+    Raises:
+        ValueError: If the transform cannot be created (e.g., incompatible profiles
+            or invalid rendering intent).
+    """
+    assert array.dtype.kind == 'f'
+    if array.ndim == 2:
+        array = array[..., None]
+
+    def prefix(profile):
+        """Return a valid colorspace prefix for the lcms2 format string."""
+        tags = getattr(profile, 'tags', None)
+        return tags['color_space'] if tags else 'RGB'
+    print(f"DEBUG: prefix(source_profile):  {prefix(source_profile)}")
+    print(f"       prefix(target_profile):  {prefix(target_profile)}")
+    print(f"       array before conversion: {array.dtype} {array.shape}")
+
+    dtype_suffix = 'FLT' if array.dtype == np.float32 else 'DBL' if array.dtype == np.float64 else '_HALF_FLT'
     try:
         transform = lcms2.Transform(source_profile, f"{prefix(source_profile)}_{dtype_suffix}",
                                     target_profile, f"{prefix(target_profile)}_{dtype_suffix}",
@@ -518,6 +559,10 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
     try:
         array = transform.apply(np.ascontiguousarray(array))
         assert array is not None
+        print(f"       array after  conversion: {array.dtype} {array.shape}")
+        if prefix(target_profile) == 'GRAY' and array.ndim == 3 and array.shape[2] == 1:
+            print("DEBUG: removing 3rd dim from GRAY image")
+            array = array[..., 0]
         return array
 
     except Exception as e:

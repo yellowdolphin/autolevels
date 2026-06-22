@@ -8,9 +8,10 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import re
+from time import perf_counter
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, JpegImagePlugin
 
 import imageio.v3 as iio
 from exiftool import ExifToolHelper
@@ -346,6 +347,34 @@ def next_free_path(folder: str | Path, stem: str, suf: str) -> Path:
     )
 
 
+def detect_image_format(path: str | Path) -> str | None:
+    with open(path, "rb") as f:
+        header = f.read(32)
+
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "PNG"
+
+    if header.startswith(b"\xff\xd8\xff"):
+        return "JPEG"
+
+    if header.startswith(b"GIF87a") or header.startswith(b"GIF89a"):
+        return "GIF"
+
+    if header.startswith(b"BM"):
+        return "BMP"
+
+    if header.startswith(b"II*\x00") or header.startswith(b"MM\x00*"):
+        return "TIFF"
+
+    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        return "WEBP"
+
+    if header.startswith(b"\x00\x00\x00\x0cjP  \r\n\x87\n"):
+        return "JPEG2000"
+
+    return None
+
+
 def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
                       input_icc_profile, output_icc_profile):
     """
@@ -363,8 +392,20 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
     Returns:
         None
     """
+    SUPPORTED_OUT_FORMATS = {  # at least ICC write support
+        'AI', 'AIT', 'ARQ', 'ARW', 'AVIF', 'CR2', 'CS1', 'DCP', 'DNG', 'EPS', 'EPSF', 'PS',
+        'ERF', 'EXV', 'FFF', 'FLIF', 'GIF', 'GPR', 'HDP', 'WDP', 'JXR', 'HEIC', 'HEIF', 'HIF',
+        'INSP', 'JPEG', 'JPG', 'JPE', 'MEF', 'MIE', 'MOS', 'MPO', 'MRW', 'NEF', 'NRW', 'ORF',
+        'ORI', 'PEF', 'PNG', 'JNG', 'MNG', 'PSD', 'PSB', 'PSDT', 'RAF', 'RAW', 'RW2', 'RWL',
+        'SR2', 'SRW', 'THM', 'TIFF', 'TIF', 'WEBP', 'X3F'}
+    t0 = perf_counter()
     if not exiftool_path or not Path(exiftool_path).exists():
         print(f"exiftool not found, metadata is not preserved in {out_fn}.")
+        return
+
+    if out_format not in SUPPORTED_OUT_FORMATS:
+        # Skipping exiftool entirely saves ~0.3 s
+        print(f"no metadata support for {out_format}, metadata is not preserved in {out_fn}")
         return
 
     # Embed ICC profile when known
@@ -413,6 +454,9 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
 
         except Exception as e:
             print(f"exiftool error: {e}")
+
+    t1 = perf_counter()
+    print(f"Wall transfer_metadata: {(t1-t0)*1000:.3f} ms")
 
 
 def get_channel_cutoff(hist, thresh, upper=False, norm=None):
@@ -596,11 +640,11 @@ def grayscale(rgb, mode='itu', keep_channels=False):
     return np.stack([L, L, L]) if keep_channels else L[:, :, None]
 
 
-def get_out_format(filename, pil_img):
+def get_out_format(filename):
     """Infer format from filename extension or use input format"""
     ext = Path(filename).suffix.lower()
     pil_extensions = Image.registered_extensions()
-    return pil_extensions.get(ext, pil_img.format if pil_img else 'JPEG')
+    return pil_extensions.get(ext)
 
 
 def estimate_jpeg_quality(pil_img):
@@ -644,15 +688,15 @@ def purge_cli_params(args, fn):
     return ' '.join(cli_params)
 
 
-def make_comment(img, version, cli_params):
+def make_comment(pil_info, version, cli_params):
     """Save program version and CLI parameters in JPEG comment or EXIF"""
 
     comments = []
 
     # Keep existing comments
-    if hasattr(img, 'info') and 'comment' in img.info:
+    if 'comment' in pil_info:
         try:
-            comments.append(img.info['comment'].decode())
+            comments.append(pil_info['comment'].decode())
         except UnicodeDecodeError:
             pass  # drop non-text comments
 
@@ -718,7 +762,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             print('Warning: ignoring option --export darktable, no model specified')
     if arg.input_icc_profile:
         # Set global profile for all input images
-        profile = get_icc_profile(arg.input_icc_profile)
+        profile = get_icc_profile(arg.input_icc_profile, add_tags=True)
         if profile and hasattr(profile, 'name'):
             arg.input_icc_profile = profile
         else:
@@ -726,7 +770,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         print(f"DEBUG: global source ICC profile: {arg.input_icc_profile.name}")
     if arg.output_icc_profile:
         # Set global profile for all output images
-        profile = get_icc_profile(arg.output_icc_profile)
+        profile = get_icc_profile(arg.output_icc_profile, add_tags=True)
         if profile and hasattr(profile, 'name'):
             arg.output_icc_profile = profile
         else:
@@ -831,16 +875,29 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             else:
                 out_fn = (outdir or fn.parent) / f'{stem}{suf}'
 
-        # Open image with PIL for metadata
+        # Get metadata from file header
         try:
             # This works with file names, BytesIO, and streamlit.UploadedFile objects
-            # TODO: extract all metadata here, use context manager, use iio.readmeta
-            pil_img = Image.open(fn if (images is None) else BytesIO(images[i]))
+            with Image.open(fn if (images is None) else BytesIO(images[i])) as img:
+                in_format = img.format
+                out_format = get_out_format(out_fn) or img.format or 'JPEG'
+                pil_info = img.info
+                image_alpha = img.getchannel('A') if img.mode in {'RGBA', 'LA'} else None
+                exif = img.getexif()
+                if in_format == 'JPEG':
+                    jpeg_subsampling = JpegImagePlugin.get_sampling(img)
+                    jpeg_quantization = img.quantization
+                elif in_format == 'TIFF' and pil_info.get('compression', '') == 'jpeg':
+                    from autolevels.tiff_processor import extract_jpeg_info_from_tiff
+                    jpeg_quantization, jpeg_subsampling = extract_jpeg_info_from_tiff(img)
+
         except Exception as e:
-            # PIL cannot handle XYZ, Lab
-            print(f'PIL could not open {fn}: {e}')
-            pil_img = None
-        out_format = get_out_format(out_fn, pil_img)
+            # PIL cannot handle XYZ, Lab. ImageIO provides no useful metadata.
+            print(f'PIL could not open {fn} for metadata: {e}')
+            in_format = detect_image_format(fn)
+            out_format = get_out_format(out_fn) or in_format or 'JPEG'
+            image_alpha = None  # determine from array or input_icc_profile later
+            pil_info = {}
 
         # Open/decode image with ImageIO to get actual pixel array
         if images is not None:
@@ -853,12 +910,12 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 else:
                     array = iio.imread(fn)
             except ValueError as e:
-                print(f"ImageIO: {e}, using PIL instead.")
-                if pil_img:
-                    # Fallback: decode image using PIL
-                    #array = np.asarray(pil_img)  # np.array/np.asarray closes pil_img!
-                    array = np.array(Image.open(fn))
+                if pil_info:
+                    print(f"ImageIO: {e}, using PIL instead.")
+                    with Image.open(fn if (images is None) else BytesIO(images[i])) as img:
+                        array = np.asarray(img)
                 else:
+                    # Image cannot be decoded, continue with next image
                     if callback is not None:
                         callback(str(fn), False, 'unsupported or corrupt image format - skipping')
                     if len(fns) == 1:
@@ -867,9 +924,11 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     continue
 
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255 if array.dtype == np.dtype('uint8') else 1
+        if array.ndim == 3 and array.shape[2] in {2, 4}:
+            image_alpha = array[:, :, -1]
 
         # Get ICC profile from input file if no global ICC file was specified, fallback: sRGB
-        input_icc_profile = arg.input_icc_profile or get_icc_profile(fn) or get_icc_profile('sRGB')
+        input_icc_profile = arg.input_icc_profile or get_icc_profile(fn, add_tags=True) or get_icc_profile('sRGB', add_tags=True)
         output_icc_profile = arg.output_icc_profile or input_icc_profile
         print(f"DEBUG: Input  ICC profile: {input_icc_profile.name}")
         print(f"DEBUG: Output ICC profile: {output_icc_profile.name}")
@@ -878,32 +937,40 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         out_48bit = all((array.dtype == np.dtype('uint16'),
                          out_format in {'PNG', 'TIFF'}))
 
-        # Handle image modes
-        img_alpha = None
-        if pil_img.mode == 'RGBA':
-            img_alpha = pil_img.getchannel('A')
-            transparency = np.array(img_alpha).min() < 255
-            if transparency:
-                if maxvalue > 255:
-                    print("Warning: this is an RGBA image with transparency. "
-                          "Flatening to canvas is necessary for any corrections, "
-                          "depth will be lowered to 8-bit. Assuming white canvas.")
-                else:
-                    print("Warning: this is an RGBA image with transparency, assuming white canvas.")
-                r, g, b, img_alpha = pil_img.split()
-                canvas = Image.new('RGB', pil_img.size, (255, 255, 255))
-                canvas.paste(pil_img, mask=img_alpha)
-                array = np.array(canvas)
-                out_48bit = False
-                del canvas, r, g, b
-            else:
-                # discard empty alpha channel
-                img_alpha = None
-        if (pil_img.mode == 'L') and (arg.saturation != 1):
+        # Handle grayscale images
+        if array.ndim == 2:
+            array = array[..., None]  # add 3rd dim if missing
+        is_grayscale = True if array.shape[2] < 3 else False
+
+        if is_grayscale and (arg.saturation != 1):
             print(f'Warning: "{fn}" is gray scale image, ignoring saturation options.')
             saturation = 1
         else:
             saturation = arg.saturation
+
+        # Handle transparency in image modes RGBA, LA
+        if image_alpha is not None:
+            transparency = image_alpha.min() < maxvalue
+            if transparency:
+                if array.dtype == np.uint8:
+                    # Fast 8-bit PIL Version
+                    pil_img = Image.fromarray(array)
+                    if array.shape[-1] == 4:
+                        canvas = Image.new('RGB', pil_img.size, (255, 255, 255))
+                    else:
+                        canvas = Image.new('L', pil_img.size, 255)
+                    canvas.paste(pil_img, mask=pil_img)
+                    array = np.array(canvas)
+                else:
+                    # Universial float32 Version
+                    dtype = array.dtype
+                    opacity = (image_alpha.astype(np.float32) / maxvalue)[..., None]
+                    array = (array[..., 0] if array.shape[-1] == 2 else array[..., :3]).astype(np.float32) / maxvalue
+                    array = (array - 1) * opacity + 1
+                    array = (array.clip(0, 1) * maxvalue).round().astype(dtype)
+            else:
+                # discard empty alpha channel
+                image_alpha = None
 
         # Adjust saturation before anything else
         if (saturation != 1) and arg.saturation_first:
@@ -918,28 +985,28 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             # Simulate: just test inference on first image
             if arg.simulate and fn != fns[0]:
                 print(f'{fn} -> {out_fn}')
-                pil_img.close()
                 continue
 
-            # Resize and floatify model input
-            # TODO: improve RGB16 by using channel-wise 16-bit resize instead of PIL's 8-bit downconversion
-            try:
-                model_input = np.asarray(pil_img.resize((384, 384)[::-1], resample=Image.Resampling.NEAREST))
-            except RuntimeError:
-                print(f"DEBUG: PIL could not decode {fn}, using ImageIO")
-                model_input = np.asarray(Image.fromarray(array).resize((384, 384)[::-1], resample=Image.Resampling.NEAREST))
-            # print(f"{pil_img.mode} {model_input.dtype} {maxvalue}")
-            model_input = model_input.astype(np.float32) / (255 if model_input.dtype == np.uint8 else 65535)  # may differ from maxvalue
+            # Resize and floatify model input before conversion to sRGB
+            #print(f"DEBUG: model_input before resize: {array.dtype} {array.shape} {array.mean(axis=(0, 1))}")
+            model_input = array.astype(np.float32) / maxvalue
+            resized = []
+            for channel in model_input.transpose(2, 0, 1):
+                pil_channel = Image.fromarray(channel, mode='F')
+                resized_channel = pil_channel.resize((384, 384), resample=Image.NEAREST)
+                resized.append(np.array(resized_channel))
+                #print(f"input channel mean: {channel.mean():8.4f}")
+                #print(f"resized mean:       {resized[-1].mean():8.4f}")
+            model_input = np.stack(resized, axis=2)
+            #print(f"DEBUG: model_input from after resize: {model_input.dtype} {model_input.shape} {model_input.mean(axis=(0, 1))}")
 
             # Convert grayscale to RGB
-            if model_input.ndim == 2:
-                is_grayscale = True
-                model_input = np.tile(model_input[:, :, None], (1, 1, 3))
-            else:
-                is_grayscale = False
-            print(f"model_input: {model_input.shape} {model_input.dtype} {model_input.max()}")
-            invertible_intents = get_invertible_intents(input_icc_profile, pil_img)
-            print(f"DEBUG: invertible_intents: {invertible_intents}")
+            if is_grayscale:
+                model_input = np.tile(model_input, (1, 1, 3))
+            #print(f"DEBUG: model_input: {model_input.shape} {model_input.dtype} {model_input.min()} {model_input.mean()} {model_input.max()}")
+
+            invertible_intents = get_invertible_intents(input_icc_profile, is_grayscale)
+            #print(f"DEBUG: invertible_intents: {invertible_intents}")
             if 'sRGB' in input_icc_profile.name or model_space == 'none':
                 free_curve = model(model_input)
                 #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save(f'{arg.outdir}/debug.png')
@@ -949,10 +1016,10 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 rendering_intent = (
                     'relative_colorimetric' if 'relative_colorimetric' in invertible_intents else
                     invertible_intents.pop())
-                print(f"Converting model input to {srgb_profile.name} ({rendering_intent})")
+                print(f"Converting model input {input_icc_profile.name} -> {srgb_profile.name} ({rendering_intent})")
                 model_input = profile_to_profile(model_input, input_icc_profile, srgb_profile, rendering_intent)
-                #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save(f'{arg.outdir}/debug.png')
-                #print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
+                Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save(f'{arg.outdir}/debug.png')
+                print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
                 free_curve = model(model_input)
                 free_curve = convert_curve_profile(free_curve, input_icc_profile, srgb_profile, rendering_intent)
             elif model_space == 'gamma' or not invertible_intents:
@@ -960,8 +1027,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 # Infer gamma of input_color_space
                 input_gamma = infer_gamma(input_icc_profile)
                 model_input = np.power(model_input, input_gamma / 2.2)
-                #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save('debug.png')
-                #print("DEBUG: wrote model input to debug.png")
+                Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save('debug.png')
+                print("DEBUG: wrote model input to debug.png")
                 free_curve = model(model_input)
                 free_curve = convert_curve_gamma(free_curve, input_gamma)
             else:
@@ -989,26 +1056,25 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     else:
                         # icc_path is ignored if xmp_file exists, otherwise considered for xmp generation
                         icc_path = arg.input_icc_profile.path if arg.input_icc_profile else None
-                        append_rgbcurve_history_item(xmp_file, free_curve, pil_img,
-                                                     icc_path=icc_path,
+                        append_rgbcurve_history_item(xmp_file, free_curve, fn, exif,
+                                                     icc_profile=input_icc_profile,
                                                      export_version=export_version)
                 except Exception as e:
                     print(f'Error: failed generating {xmp_file}, skipping darktable export.')
                     print(e)  # DEBUG
                     if skip_image_output:
-                        pil_img.close()
                         continue
 
                 if skip_image_output:
                     print(f'{fn} -> {xmp_file}')
-                    pil_img.close()
                     continue
 
+            print(f"array before free_curve_map: {array.shape}")
             array = free_curve_map_image(array, free_curve)  # float32, range (0, 1)
+            print(f"array after  free_curve_map: {array.shape}")
 
             if arg.simulate:
                 print(f'{fn} -> {out_fn}')
-                pil_img.close()
                 continue
 
         else:
@@ -1041,7 +1107,6 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             if arg.simulate:
                 print(f'{fn} -> {out_fn} (black point: {blackpoint} -> {target_black.round().astype("int")}, '
                       f'white point: {whitepoint} -> {target_white.round().astype("int")})')
-                pil_img.close()
                 continue
 
             # Make target black/white points gamma-agnostic
@@ -1111,28 +1176,26 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             img = Image.fromarray(array)
             del array
 
-            # Merge with alpha (RGBA images only)
-            if img_alpha is not None:
-                img = Image.merge('RGBA', [*img.split(), img_alpha])
+            # Merge with alpha (LA, RGBA images only)
+            if image_alpha is not None:
+                image_alpha = Image.fromarray(image_alpha, mode='L')
+                img = Image.merge('LA' if img.mode == 'L' else 'RGBA', [*img.split(), image_alpha])
 
             # Configure save options
             if out_format in {'JPEG'}:
                 # Preserve JPEG quality
-                from PIL import JpegImagePlugin
-                if pil_img.format in {'JPEG'}:
-                    kwargs['subsampling'] = JpegImagePlugin.get_sampling(pil_img)
-                    kwargs['qtables'] = pil_img.quantization
-                elif pil_img.format == 'TIFF' and pil_img.info.get('compression', '') == 'jpeg':
+                if in_format in {'JPEG'}:
+                    kwargs['subsampling'] = jpeg_subsampling
+                    kwargs['qtables'] = jpeg_quantization
+                elif in_format == 'TIFF' and pil_info.get('compression', '') == 'jpeg':
                     # qtables from TIFF are for RGB, not YCbCr, just keep quality-level
-                    from autolevels.tiff_processor import extract_jpeg_info_from_tiff
-                    qtables, subsampling = extract_jpeg_info_from_tiff(pil_img)
-                    quality = estimate_jpeg_quality(qtables)
+                    quality = estimate_jpeg_quality(jpeg_quantization)
                     kwargs['quality'] = 44 + round((quality - 24) * (100 - 44) / (100 - 24))
-                    kwargs['subsampling'] = subsampling
+                    kwargs['subsampling'] = jpeg_subsampling
                 else:
                     kwargs['quality'] = DEFAULT_QUALITY
-                    kwargs['subsampling'] = 2 if pil_img.format in {'AVIF'} else 0
-            elif out_format in {'TIFF'} and pil_img.format == 'JPEG':
+                    kwargs['subsampling'] = 2 if in_format in {'AVIF'} else 0
+            elif out_format in {'TIFF'} and in_format == 'JPEG':
                 # Try to preserve visual input image JPEG quality (not file size).
                 # TIFF files with JPEG-compression are larger because
                 # - encode RGB, not YCbCr -> no effective quantization/Huffman coding (2.1×)
@@ -1140,16 +1203,14 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 # - stripes/overhead (< 1%)
                 # Lower quality factor a bit (empirically) to match YCbCr compression quality
                 kwargs['compression'] = 'jpeg'
-                jpeg_quality = estimate_jpeg_quality(pil_img)
+                jpeg_quality = estimate_jpeg_quality(jpeg_quantization)
                 jpeg_quality = max(24, 24 + round((jpeg_quality - 44) * (100 - 24) / (100 - 44)))
                 kwargs['quality'] = jpeg_quality
             elif out_format == 'TIFF':
                 # Keep input image compression if available (TIFF -> TIFF)
-                kwargs['compression'] = pil_img.info.get('compression', 'tiff_adobe_deflate')
+                kwargs['compression'] = pil_info.get('compression', 'tiff_adobe_deflate')
                 if kwargs['compression'] == 'jpeg':
-                    from autolevels.tiff_processor import extract_jpeg_info_from_tiff
-                    qtables, subsampling = extract_jpeg_info_from_tiff(pil_img)
-                    jpeg_quality = estimate_jpeg_quality(qtables)
+                    jpeg_quality = estimate_jpeg_quality(jpeg_quantization)
                     kwargs['quality'] = jpeg_quality
 
             # Make reproducible, leave CLI args in JPEG comment
@@ -1157,7 +1218,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 cli_params = arg.cli_params
             else:
                 cli_params = purge_cli_params(argv, fn)
-            comment = make_comment(pil_img, __version__, cli_params)
+            comment = make_comment(pil_info, __version__, cli_params)
 
             if return_bytes:
                 out_fn = BytesIO()
@@ -1169,20 +1230,18 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 img.save(out_fn, comment=comment, optimize=True, **kwargs)
             except ValueError as e:
                 # If that fails, save in original format
-                print(f"{e}, saving in {pil_img.format}.")
-                img.save(out_fn, format=pil_img.format, comment=comment, optimize=True, **kwargs)
+                # ImageIO: could extend suppoted formats, but may save in different format (TIFF)
+                # without warning -> don't use for now
+                print(f"{e}, saving in {in_format}.")
+                img.save(out_fn, format=in_format, comment=comment, optimize=True, **kwargs)
 
             if return_bytes:
                 # No EXIF is needed for previews
-                pil_img.close()
                 return out_fn.getvalue()
 
         if images is None and not arg.skip_metadata:
             transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
                               input_icc_profile, output_icc_profile)
-
-        # Clean up
-        pil_img.close()
 
         # Logging
         infos = [f'{fn} -> {out_fn}']

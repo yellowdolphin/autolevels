@@ -139,14 +139,14 @@ def get_ensemble(filenames):
 
 def free_curve_map_image(img, curves):
     assert curves.dtype == np.float32, str(curves.dtype)  # float32
-    assert img.dtype in {np.dtype('uint8'), np.dtype('uint16')}, f"img.dtype: {img.dtype} not supported"
     assert (curves >= 0).all(), f'curves.min: {curves.min()}'
     assert (curves <= 1).all(), f'curves.max: {curves.max()}'
     curves = curves.reshape(3, 256)
 
-    # Handle gray scale image
+    # Handle gray scale images
     if img.ndim == 2:
         img = img[:, :, None]
+    if img.shape[2] == 1:
         curves = curves.mean(axis=0, keepdims=True)
 
     # Optionally export curves
@@ -165,6 +165,13 @@ def free_curve_map_image(img, curves):
                 # Create a new dataset, resizable along axis 0
                 hdf_file.create_dataset(dataset_name, data=curves, maxshape=(None, 256))
 
+    # Direct Interpolation on float image
+    # This takes 2-5x longer than inference on large images, but still less than LUT conversion!
+    if img.dtype.kind == 'f':
+        for i, curve in enumerate(curves):
+            img[:, :, i] = np.interp(img[:, :, i], np.linspace(0, 1, 256), curve)
+        return img[..., 0] if img.shape[2] == 1 else img
+
     # Upsample curves for uint16 images
     #curves_original = curves.copy()
     if img.dtype == np.uint16:
@@ -177,13 +184,6 @@ def free_curve_map_image(img, curves):
     # Map each channel using fancy indexing
     for i, curve in enumerate(curves):
         transformed[:, :, i] = curve[img[:, :, i]]
-
-    # Alternative: Direct Interpolation on float image
-    # This takes 2-5x longer than inference on large images, but still less than LUT conversion!
-    #maxvalue = 65535 if img.dtype == np.uint16 else 255
-    #a = img.astype(np.float32) / maxvalue
-    #for i, curve in enumerate(curves_original):
-    #    a[:, :, i] = np.interp(a[:, :, i], np.linspace(0, 1, 256), curve)
 
     # Remove channel dim from gray scale image
     if transformed.shape[2] == 1:
