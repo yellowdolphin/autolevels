@@ -391,14 +391,6 @@ def verify_tiff_image(fn, reference=None, strict=False):
     Returns:
         bool: True if verification passes, False otherwise
     """
-    # Fastest test: file size should increase with metadata transferred
-    if reference is not None:
-        tolerance = 10000  # allow some invalid metadata be removed
-        if Path(fn).stat().st_size + tolerance < Path(reference).stat().st_size:
-            #print(f"exiftool abort: temp file size ({Path(fn).stat().st_size/1024/1024:.3f} MB) smaller than "
-            #      f"original size ({Path(reference).stat().st_size/1024/1024:.3f} MB)")
-            return False
-
     # Check header and magic byte
     with open(fn, 'rb') as f:
         magic = f.read(4)

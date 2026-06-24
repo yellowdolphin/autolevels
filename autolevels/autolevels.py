@@ -969,8 +969,9 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     array = (array - 1) * opacity + 1
                     array = (array.clip(0, 1) * maxvalue).round().astype(dtype)
             else:
-                # discard empty alpha channel
+                # Discard empty alpha channel
                 image_alpha = None
+                array = array[..., :3] if array.shape[-1] == 4 else array[..., :1]
 
         # Adjust saturation before anything else
         if (saturation != 1) and arg.saturation_first:
@@ -1151,7 +1152,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         if out_48bit:
             if not ('XYZ' in output_icc_profile.name or 'Lab' in output_icc_profile.name):
                 # Quantize to 16-bit
-                print(array.dtype, array.shape, array.min(), array.max())
+                #print(array.dtype, array.shape, array.min(), array.max())
                 array = (array * 65535).round().clip(0, 65535).astype('uint16')
             if out_format == 'PNG':
                 # ImageIO by default cannot save 48-bit PNG (employs PIL for PNG). 2 Options:
@@ -1160,16 +1161,30 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
                 # (B) freeimage plugin: 8x slower (compression=6) or 10% larger file (compression=1)
                 import imageio
-                imageio.plugins.freeimage.download()  # once to install the lib
-                iio.imwrite(out_fn, array, plugin='PNG-FI', compression=6)  # 995 ms
+                try:
+                    imageio.plugins.freeimage.download()  # once to install the lib
+                    iio.imwrite(out_fn, array, plugin='PNG-FI', compression=6)  # 995 ms
+                except Exception as e:
+                    print(f"ImageIO: {e}")
+                    if callback is not None:
+                        callback(str(fn), False, f'{e}')
+                    continue
             elif out_format == 'TIFF':
-                iio.imwrite(out_fn, array, plugin='tifffile', compression="zlib", compressionargs={'level': 3}, predictor=True)
+                try:
+                    iio.imwrite(out_fn, array, plugin='tifffile', compression="zlib", compressionargs={'level': 3}, predictor=True)
+                except Exception as e:
+                    print(f"ImageIO: {e}")
+                    if callback is not None:
+                        callback(str(fn), False, f'{e}')
+                    continue
             else:
                 try:
                     iio.imwrite(out_fn, array)
                 except TypeError as e:
                     print(f"ImageIO: {e}")
-                    print(array.dtype, array.shape, array.min(), array.max())
+                    if callback is not None:
+                        callback(str(fn), False, f'{e}')
+                    continue
         else:
             # Quantize to 8-bit, continue with PIL Image
             array = (array * 255).round().clip(0, 255).astype('uint8')
@@ -1229,11 +1244,16 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 # Let PIL derive file format from extension
                 img.save(out_fn, comment=comment, optimize=True, **kwargs)
             except ValueError as e:
-                # If that fails, save in original format
-                # ImageIO: could extend suppoted formats, but may save in different format (TIFF)
-                # without warning -> don't use for now
-                print(f"{e}, saving in {in_format}.")
-                img.save(out_fn, format=in_format, comment=comment, optimize=True, **kwargs)
+                # Attempted alternatives:
+                # - ImageIO: could extend supported formats, but may save in different format (TIFF)
+                #   without warning -> don't use for now.
+                # - tifffile for TIFF with JPEG compression: has issues (bad preview and other tags),
+                #   requires imagecodecs, an EXIF parser (piexif), and code for composing the extratags list.
+                # - Drop previous behavior saving in input format if suffix is not recognized:
+                #   img.save(out_fn, format=in_format, comment=comment, optimize=True, **kwargs)
+                if callback is not None:
+                    callback(str(fn), False, f'{e}')
+                continue
 
             if return_bytes:
                 # No EXIF is needed for previews
