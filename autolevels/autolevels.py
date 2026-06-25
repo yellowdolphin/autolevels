@@ -951,6 +951,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         # Handle transparency in image modes RGBA, LA
         if image_alpha is not None:
             transparency = image_alpha.min() < maxvalue
+            # Paste transparent images on white canvas
             if transparency:
                 if array.dtype == np.uint8:
                     # Fast 8-bit PIL Version
@@ -969,9 +970,14 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     array = (array - 1) * opacity + 1
                     array = (array.clip(0, 1) * maxvalue).round().astype(dtype)
             else:
-                # Discard empty alpha channel
+                # Discard alpha channel if fully opaque
                 image_alpha = None
                 array = array[..., :3] if array.shape[-1] == 4 else array[..., :1]
+                print(f"output format does not support transparency {array.shape}")
+
+            # Also discard alpha channel if not supported by output format
+            if out_format in {'JPEG'}:
+                image_alpha = None
 
         # Adjust saturation before anything else
         if (saturation != 1) and arg.saturation_first:
