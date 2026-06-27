@@ -708,12 +708,18 @@ def make_comment(pil_info, version, cli_params):
 def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=False):
     """Pass callback when processing multiple files with a curve model.
 
-    callback (callable): call when finishing a file, pass input_path (str), True, info_str
-    If error occurs: pass input_path (str), False, error message (str) to proceed or
-    return an error message to abort.
-    loaded_model (pt or tf model as returned by inference.get_model)
-    argv (list): command line args to use instead of sys.argv[1:]
-    images (list): images as BytesIO objects
+    Args:
+        callback (callable): call when finishing a file, pass
+            (input_path (str), True, info_str) after succesful iteration,
+            (input_path (str), False, error_message (str)) if iteration fails.
+            It returns: True to continue or False to abort (return None or 'user abort')
+        loaded_model (PyTorch, tensorflow, or onnx model as returned by inference.get_model)
+        argv (list): command line args to use instead of sys.argv[1:]
+        images (list): images as BytesIO objects
+
+    Returns:
+        bytes (image) if return_bytes, else
+        None (normal termination) or str (error message, if global error occurs)
     """
     argv = argv or sys.argv[1:]
     parser = get_parser()
@@ -849,8 +855,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         # Skip non-existing
         if (images is None) and not fn.is_file():
             print(f"Error: {fn} not found - skipping")
-            if callback is not None:
-                callback(str(fn), False, 'not found - skipping')
+            if callable(callback) and callback(str(fn), False, 'not found - skipping') is False:
+                return 'user abort'
             continue
 
         # Decide output file name
@@ -916,8 +922,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                         array = np.asarray(img)
                 else:
                     # Image cannot be decoded, continue with next image
-                    if callback is not None:
-                        callback(str(fn), False, 'unsupported or corrupt image format - skipping')
+                    if callable(callback) and callback(str(fn), False, 'unsupported or corrupt image format - skipping') is False:
+                        return 'user abort'
                     if len(fns) == 1:
                         # Return if this was the only file to process and it failed.
                         return f'Unsupported or corrupt image format: {fn}'
@@ -1172,24 +1178,24 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     iio.imwrite(out_fn, array, plugin='PNG-FI', compression=6)  # 995 ms
                 except Exception as e:
                     print(f"ImageIO: {e}")
-                    if callback is not None:
-                        callback(str(fn), False, f'{e}')
+                    if callable(callback) and callback(str(fn), False, f'{e}') is False:
+                        return 'user abort'
                     continue
             elif out_format == 'TIFF':
                 try:
                     iio.imwrite(out_fn, array, plugin='tifffile', compression="zlib", compressionargs={'level': 3}, predictor=True)
                 except Exception as e:
                     print(f"ImageIO: {e}")
-                    if callback is not None:
-                        callback(str(fn), False, f'{e}')
+                    if callable(callback) and callback(str(fn), False, f'{e}') is False:
+                        return 'user abort'
                     continue
             else:
                 try:
                     iio.imwrite(out_fn, array)
                 except TypeError as e:
                     print(f"ImageIO: {e}")
-                    if callback is not None:
-                        callback(str(fn), False, f'{e}')
+                    if callable(callback) and callback(str(fn), False, f'{e}') is False:
+                        return 'user abort'
                     continue
         else:
             # Quantize to 8-bit, continue with PIL Image
@@ -1257,12 +1263,12 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 #   requires imagecodecs, an EXIF parser (piexif), and code for composing the extratags list.
                 # - Drop previous behavior saving in input format if suffix is not recognized:
                 #   img.save(out_fn, format=in_format, comment=comment, optimize=True, **kwargs)
-                if callback is not None:
-                    callback(str(fn), False, f'{e}')
+                if callable(callback) and callback(str(fn), False, f'{e}') is False:
+                    return 'user abort'
                 continue
 
             if return_bytes:
-                # No EXIF is needed for previews
+                # Return image for previews and streamlit, no metadata or infos are needed
                 return out_fn.getvalue()
 
         if images is None and not arg.skip_metadata:
@@ -1279,9 +1285,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             infos.append(f'{low}white point: {whitepoint} -> {target_white.round().astype("int")}')
         print(', '.join(infos))
 
-        # Callback
-        if callback is not None:
-            callback(str(fn), True, infos)
+        if callable(callback) and callback(str(fn), True, infos) is False:
+            return 'user abort'
 
 
 if __name__ == '__main__':
