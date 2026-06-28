@@ -535,6 +535,8 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
             or invalid rendering intent).
     """
     assert array.dtype.kind == 'f'
+
+    # lcms2 requires ndim == 3 (last dim interpreted as channels)
     if array.ndim == 2:
         array = array[..., None]
 
@@ -546,10 +548,23 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
     print(f"       prefix(target_profile):  {prefix(target_profile)}")
     print(f"       array before conversion: {array.dtype} {array.shape}")
 
+    # Handle mismatch between image shape and input_icc_profile color space
+    num_channels = array.shape[2]
+    source_profile_space = prefix(source_profile)
+    target_profile_space = prefix(target_profile)
+    if source_profile_space == 'GRAY' and num_channels > 1:
+        raise ValueError(f'You cannot assign a GRAY ICC profile to a {num_channels}-channel image')
+    if source_profile_space != 'GRAY' and num_channels != 3:
+        if num_channels == 1:
+            print(f"Warning: {source_profile_space} profile assigned to {num_channels}-channel image, treating as RGB")
+            array = np.tile(array, (1, 1, 3))
+        else:
+            raise ValueError(f'You cannot assign a {source_profile_space} ICC profile to a {num_channels}-channel image')
+
     dtype_suffix = 'FLT' if array.dtype == np.float32 else 'DBL' if array.dtype == np.float64 else '_HALF_FLT'
     try:
-        transform = lcms2.Transform(source_profile, f"{prefix(source_profile)}_{dtype_suffix}",
-                                    target_profile, f"{prefix(target_profile)}_{dtype_suffix}",
+        transform = lcms2.Transform(source_profile, f"{source_profile_space}_{dtype_suffix}",
+                                    target_profile, f"{target_profile_space}_{dtype_suffix}",
                                     intent=rendering_intent.upper(),
                                     #flags="GAMUTCHECK,SOFTPROOFING",
                                     )

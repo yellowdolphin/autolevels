@@ -493,10 +493,14 @@ def get_blackpoint_whitepoint(array, maxvalue, mode, pixel_black, pixel_white):
     # 3x3 or 5x5 envelope
     SMOOTH = ImageFilter.SMOOTH_MORE if mode == 'smoother' else ImageFilter.SMOOTH
 
-    # convert to PIL.Image
+    # PIL requires ndim 2 for gray images (mode L)
+    if array.ndim == 3 and array.shape[-1] == 1:
+        array = array[..., 0]
+
+    # Convert to PIL.Image
     if array.dtype == np.dtype('uint16'):
-        img = Image.fromarray((array.astype('float32') * (255 / 65535)).clip(0, 255).astype('uint8'))
-    elif array.dtype in {np.dtype('float32'), np.dtype('float64')}:
+        img = Image.fromarray((array // 256).astype('uint8'))
+    elif array.dtype.kind == 'f':
         img = Image.fromarray((array * (255 / maxvalue)).clip(0, 255).astype('uint8'))
     elif array.dtype == np.dtype('uint8'):
         img = Image.fromarray(array)
@@ -1200,6 +1204,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         else:
             # Quantize to 8-bit, continue with PIL Image
             array = (array * 255).round().clip(0, 255).astype('uint8')
+            if array.ndim == 3 and array.shape[-1] == 1:
+                array = array[..., 0]  # PIL requires ndim 2 for gray images (mode L)
             img = Image.fromarray(array)
             del array
 
