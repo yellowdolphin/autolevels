@@ -2,6 +2,7 @@ import struct
 from pathlib import Path
 from importlib import resources
 from PIL import Image
+from time import perf_counter, sleep
 import numpy as np
 import lcms2
 import imageio.v3 as iio
@@ -572,11 +573,14 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
         raise ValueError(f"Transform impossible from {source_profile.name} to {target_profile.name} ({rendering_intent}): {e}")
 
     try:
-        array = transform.apply(np.ascontiguousarray(array))
-        assert array is not None
+        print(f"       transform...")
+        t0 = perf_counter()
+        for i, line in enumerate(array):
+            array[i] = transform.apply(np.ascontiguousarray(line))  # apply keeps the GIL!
+            sleep(0)  # release GIL for the frontend to update
+        print(f"       transform.apply took {perf_counter() - t0:.3f} s")
         print(f"       array after  conversion: {array.dtype} {array.shape}")
         if prefix(target_profile) == 'GRAY' and array.ndim == 3 and array.shape[2] == 1:
-            print("DEBUG: removing 3rd dim from GRAY image")
             array = array[..., 0]
         return array
 
