@@ -856,12 +856,13 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
     # Process input files
     for i, fn in enumerate(fns):
-        # Skip non-existing
+        # Input file does not exist, skip or return
         if (images is None) and not fn.is_file():
-            print(f"Error: {fn} not found - skipping")
-            if callable(callback) and callback(str(fn), False, 'not found - skipping') is False:
-                return 'user abort'
-            continue
+            if callable(callback):
+                return '{fn} not found'
+            else:
+                print(f"Error: {fn} not found - skipping")
+                continue
 
         # Decide output file name
         if arg.outfstring:
@@ -925,13 +926,13 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     with Image.open(fn if (images is None) else BytesIO(images[i])) as img:
                         array = np.asarray(img)
                 else:
-                    # Image cannot be decoded, continue with next image
-                    if callable(callback) and callback(str(fn), False, 'unsupported or corrupt image format - skipping') is False:
-                        return 'user abort'
-                    if len(fns) == 1:
+                    # Image cannot be decoded, return or continue with next image
+                    print('unsupported or corrupt image format - skipping')
+                    if callable(callback) or len(fns) == 1:
                         # Return if this was the only file to process and it failed.
                         return f'Unsupported or corrupt image format: {fn}'
-                    continue
+                    else:
+                        continue
 
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255 if array.dtype == np.dtype('uint8') else 1
         if array.ndim == 3 and array.shape[2] in {2, 4}:
@@ -1182,25 +1183,28 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     iio.imwrite(out_fn, array, plugin='PNG-FI', compression=6)  # 995 ms
                 except Exception as e:
                     print(f"ImageIO: {e}")
-                    if callable(callback) and callback(str(fn), False, f'{e}') is False:
-                        return 'user abort'
-                    continue
+                    if callable(callback):
+                        return f'{e}'
+                    else:
+                        continue
             elif out_format == 'TIFF':
                 try:
                     iio.imwrite(out_fn, array, plugin='tifffile', compression="zlib", compressionargs={'level': 3}, predictor=True)
                 except Exception as e:
                     print(f"ImageIO: {e}")
-                    if callable(callback) and callback(str(fn), False, f'{e}') is False:
-                        return 'user abort'
-                    continue
+                    if callable(callback):
+                        return f'{e}'
+                    else:
+                        continue
             else:
                 try:
                     iio.imwrite(out_fn, array)
                 except TypeError as e:
                     print(f"ImageIO: {e}")
-                    if callable(callback) and callback(str(fn), False, f'{e}') is False:
-                        return 'user abort'
-                    continue
+                    if callable(callback):
+                        return f'{e}'
+                    else:
+                        continue
         else:
             # Quantize to 8-bit, continue with PIL Image
             array = (array * 255).round().clip(0, 255).astype('uint8')
@@ -1269,9 +1273,11 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 #   requires imagecodecs, an EXIF parser (piexif), and code for composing the extratags list.
                 # - Drop previous behavior saving in input format if suffix is not recognized:
                 #   img.save(out_fn, format=in_format, comment=comment, optimize=True, **kwargs)
-                if callable(callback) and callback(str(fn), False, f'{e}') is False:
-                    return 'user abort'
-                continue
+                print(f"PIL: {e}")
+                if callable(callback):
+                    return f'{e}'
+                else:
+                    continue
 
             if return_bytes:
                 # Return image for previews and streamlit, no metadata or infos are needed
@@ -1291,6 +1297,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             infos.append(f'{low}white point: {whitepoint} -> {target_white.round().astype("int")}')
         print(', '.join(infos))
 
+        # Call callback for user-abort feature
         if callable(callback) and callback(str(fn), True, infos) is False:
             return 'user abort'
 
