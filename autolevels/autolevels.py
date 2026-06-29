@@ -8,7 +8,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import re
-from time import perf_counter
+#from time import perf_counter
 
 import numpy as np
 from PIL import Image, ImageFilter, JpegImagePlugin
@@ -18,7 +18,7 @@ from exiftool import ExifToolHelper
 from exiftool.exceptions import ExifToolExecuteError
 
 from autolevels.icc.icc import (get_icc_profile, get_invertible_intents, profile_to_profile,
-                                infer_gamma, convert_curve_gamma, convert_curve_profile)
+                                infer_gamma, convert_curve_gamma, convert_curve_profile, profiles_differ)
 
 
 KEEP_WHITE = False  # keep white instead of whitepoint if no whitepoint is specified
@@ -398,7 +398,6 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
         'INSP', 'JPEG', 'JPG', 'JPE', 'MEF', 'MIE', 'MOS', 'MPO', 'MRW', 'NEF', 'NRW', 'ORF',
         'ORI', 'PEF', 'PNG', 'JNG', 'MNG', 'PSD', 'PSB', 'PSDT', 'RAF', 'RAW', 'RW2', 'RWL',
         'SR2', 'SRW', 'THM', 'TIFF', 'TIF', 'WEBP', 'X3F'}
-    t0 = perf_counter()
     if not exiftool_path or not Path(exiftool_path).exists():
         print(f"exiftool not found, metadata is not preserved in {out_fn}.")
         return
@@ -454,9 +453,6 @@ def transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
 
         except Exception as e:
             print(f"exiftool error: {e}")
-
-    t1 = perf_counter()
-    print(f"Wall transfer_metadata: {(t1-t0)*1000:.3f} ms")
 
 
 def get_channel_cutoff(hist, thresh, upper=False, norm=None):
@@ -856,6 +852,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
     # Process input files
     for i, fn in enumerate(fns):
+        #t0 = perf_counter()
+
         # Input file does not exist, skip or return
         if (images is None) and not fn.is_file():
             if callable(callback):
@@ -933,6 +931,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                         return f'Unsupported or corrupt image format: {fn}'
                     else:
                         continue
+        #t1 = perf_counter()
+        #print(f"{'Wall image read:':<30} {(t1 - t0) * 1000:.0f} ms")
 
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255 if array.dtype == np.dtype('uint8') else 1
         if array.ndim == 3 and array.shape[2] in {2, 4}:
@@ -1000,6 +1000,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             maxvalue = 65535
 
         if arg.model:
+            #t2 = perf_counter()
+            #print(f"{'Wall ICC, float, alpha, gray:':<30} {(t2 - t1) * 1000:.0f} ms")
             # Simulate: just test inference on first image
             if arg.simulate and fn != fns[0]:
                 print(f'{fn} -> {out_fn}')
@@ -1023,6 +1025,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 model_input = np.tile(model_input, (1, 1, 3))
             #print(f"DEBUG: model_input: {model_input.shape} {model_input.dtype} {model_input.min()} {model_input.mean()} {model_input.max()}")
 
+            #t3 = perf_counter()
+            #print(f"{'Wall model input:':<30} {(t3 - t2) * 1000:.0f} ms")
             invertible_intents = get_invertible_intents(input_icc_profile, is_grayscale)
             #print(f"DEBUG: invertible_intents: {invertible_intents}")
             if 'sRGB' in input_icc_profile.name or model_space == 'none':
@@ -1036,8 +1040,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     invertible_intents.pop())
                 print(f"Converting model input {input_icc_profile.name} -> {srgb_profile.name} ({rendering_intent})")
                 model_input = profile_to_profile(model_input, input_icc_profile, srgb_profile, rendering_intent)
-                Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save(f'{arg.outdir}/debug.png')
-                print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
+                #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save(f'{arg.outdir}/debug.png')
+                #print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
                 free_curve = model(model_input)
                 free_curve = convert_curve_profile(free_curve, input_icc_profile, srgb_profile, rendering_intent)
             elif model_space == 'gamma' or not invertible_intents:
@@ -1045,12 +1049,14 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 # Infer gamma of input_color_space
                 input_gamma = infer_gamma(input_icc_profile)
                 model_input = np.power(model_input, input_gamma / 2.2)
-                Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save('debug.png')
-                print("DEBUG: wrote model input to debug.png")
+                #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save('debug.png')
+                #print("DEBUG: wrote model input to debug.png")
                 free_curve = model(model_input)
                 free_curve = convert_curve_gamma(free_curve, input_gamma)
             else:
                 raise ValueError(f"unknown model space adaptation: {model_space}")
+            #t4 = perf_counter()
+            #print(f"{'Wall model inference:':<30} {(t4 - t3) * 1000:.0f} ms")
 
             # Keep gray images gray
             if is_grayscale:
@@ -1087,9 +1093,9 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     print(f'{fn} -> {xmp_file}')
                     continue
 
-            print(f"array before free_curve_map: {array.shape}")
+            #print(f"array before free_curve_map: {array.shape}")
             array = free_curve_map_image(array, free_curve)  # float32, range (0, 1)
-            print(f"array after  free_curve_map: {array.shape}")
+            #print(f"array after  free_curve_map: {array.shape}")
 
             if arg.simulate:
                 print(f'{fn} -> {out_fn}')
@@ -1161,10 +1167,14 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             array = blend(array, L, saturation)
 
         # Convert to output color space
-        if output_icc_profile.name != input_icc_profile.name:
+        if profiles_differ(input_icc_profile, output_icc_profile):
             print(f"Converting image from {input_icc_profile.name} to {output_icc_profile.name}")
             array = profile_to_profile(array, input_icc_profile, output_icc_profile, arg.rendering_intent)
+        #else:
+        #    print(f"DEBUG equivalent: {input_icc_profile.name} == {output_icc_profile.name}")
 
+        #t5 = perf_counter()
+        #print(f"{'Wall adjust + convert:':<30} {(t5 - t4) * 1000:.0f} ms")
         kwargs = {}  # TODO: allow user to set save options, fill kwargs accordingly for ImageIO/PIL
         if out_48bit:
             if not ('XYZ' in output_icc_profile.name or 'Lab' in output_icc_profile.name):
@@ -1283,6 +1293,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 # Return image for previews and streamlit, no metadata or infos are needed
                 return out_fn.getvalue()
 
+        #t6 = perf_counter()
         if images is None and not arg.skip_metadata:
             transfer_metadata(fn, out_fn, out_format, kwargs, exiftool_path,
                               input_icc_profile, output_icc_profile)
@@ -1300,6 +1311,11 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         # Call callback for user-abort feature
         if callable(callback) and callback(str(fn), True, infos) is False:
             return 'user abort'
+
+        #t7 = perf_counter()
+        #print(f"{'Wall image save:':<30} {(t6 - t5) * 1000:.0f} ms")
+        #print(f"{'Wall metadata:':<30} {(t7 - t6) * 1000:.0f} ms")
+        #print(f"{'Wall total:':<30} {(t7 - t0) * 1000:.0f} ms")
 
 
 if __name__ == '__main__':

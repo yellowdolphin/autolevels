@@ -3,6 +3,7 @@ from pathlib import Path
 from importlib import resources
 from PIL import Image
 from time import perf_counter, sleep
+import re
 import numpy as np
 import lcms2
 import imageio.v3 as iio
@@ -195,6 +196,34 @@ def get_icc_profile(path, add_tags=False):
                 return profile
             print(f"lcms2 error: {e}")
             return None
+
+
+def profiles_differ(left_profile, right_profile):
+    """Test whether two lcms2.Profile instances are equivalent or not"""
+    if not (left_profile and right_profile):
+        return True
+
+    if all (hasattr(p, 'tags') for p in (left_profile, right_profile)):
+        if left_profile.tags['color_space'] != right_profile.tags['color_space']:
+            return True
+
+        if left_profile.tags['pcs'] != right_profile.tags['pcs']:
+            return True
+
+        # Consider all variants of sRGB equivalent (too sloppy?)
+        if all('sRGB' in p.name for p in (left_profile, right_profile)):
+            return False
+
+        # Consider all variants of "Adobe RGB (1998)" equivalent
+        if all('Adobe RGB' in p.name for p in (left_profile, right_profile)):
+            return False
+
+    # Compare DescriptionTag's but ignore some appendices like " (our version)"
+    descriptions = [p.name for p in (left_profile, right_profile)]
+    descriptions = [d.replace(' built-in', '') for d in descriptions]
+    descriptions = [re.sub(r" \(.*\)", "", d) for d in descriptions]
+
+    return descriptions[0] != descriptions[1]
 
 
 def decode_trc(raw):
@@ -545,9 +574,8 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
         """Return a valid colorspace prefix for the lcms2 format string."""
         tags = getattr(profile, 'tags', None)
         return tags['color_space'] if tags else 'RGB'
-    print(f"DEBUG: prefix(source_profile):  {prefix(source_profile)}")
-    print(f"       prefix(target_profile):  {prefix(target_profile)}")
-    print(f"       array before conversion: {array.dtype} {array.shape}")
+    #print(f"DEBUG: prefix(source_profile):  {prefix(source_profile)}")
+    #print(f"       prefix(target_profile):  {prefix(target_profile)}")
 
     # Handle mismatch between image shape and input_icc_profile color space
     num_channels = array.shape[2]
@@ -561,6 +589,7 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
             array = np.tile(array, (1, 1, 3))
         else:
             raise ValueError(f'You cannot assign a {source_profile_space} ICC profile to a {num_channels}-channel image')
+    #print(f"       array before conversion: {array.dtype} {array.shape}")
 
     dtype_suffix = 'FLT' if array.dtype == np.float32 else 'DBL' if array.dtype == np.float64 else '_HALF_FLT'
     try:
@@ -573,13 +602,17 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
         raise ValueError(f"Transform impossible from {source_profile.name} to {target_profile.name} ({rendering_intent}): {e}")
 
     try:
-        print(f"       transform...")
-        t0 = perf_counter()
-        for i, line in enumerate(array):
-            array[i] = transform.apply(np.ascontiguousarray(line))  # apply keeps the GIL!
-            sleep(0)  # release GIL for the frontend to update
-        print(f"       transform.apply took {perf_counter() - t0:.3f} s")
-        print(f"       array after  conversion: {array.dtype} {array.shape}")
+        # Split conversion to work around lcms2 GIL issue (takes only 6 % longer)
+        # Note: input and output array have different shapes if one profile is GRAY, the other RGB
+        # Probe output shape on the first line
+        first_line = transform.apply(np.ascontiguousarray(array[0]))
+        out = np.empty((array.shape[0], *first_line.shape), dtype=first_line.dtype)
+        out[0] = first_line
+
+        for i in range(1, array.shape[0]):
+            out[i] = transform.apply(np.ascontiguousarray(array[i]))
+            sleep(0)  # one GIL release per chunk, not per line
+        array = out
         if prefix(target_profile) == 'GRAY' and array.ndim == 3 and array.shape[2] == 1:
             array = array[..., 0]
         return array
