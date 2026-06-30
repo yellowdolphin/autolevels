@@ -914,8 +914,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         else:
             try:
                 if fn.suffix.lower() == '.png':
-                    array = iio.imread(fn, plugin='PNG-FI')  # load RGB16 correctly
-                    #array = iio.imread(fn, plugin='opencv', flags=-1)[:, :, ::-1]  # load RGB16 correctly
+                    #array = iio.imread(fn, plugin='PNG-FI')  # load RGB16 correctly
+                    array = iio.imread(fn, plugin='opencv', flags=-1)  # load RGB16 correctly
                 else:
                     array = iio.imread(fn)
             except ValueError as e:
@@ -1184,19 +1184,22 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             if out_format == 'PNG':
                 # ImageIO by default cannot save 48-bit PNG (employs PIL for PNG). 2 Options:
                 # (A) opencv plugin: 50 MB extra package size for cv2, loads/saves reasonably fast
-                # iio.imwrite(out_fn, array, plugin='opencv')  # 295 ms
+                iio.imwrite(out_fn, array, plugin='opencv')  # 295 ms
 
                 # (B) freeimage plugin: 8x slower (compression=6) or 10% larger file (compression=1)
-                import imageio
-                try:
-                    imageio.plugins.freeimage.download()  # once to install the lib
-                    iio.imwrite(out_fn, array, plugin='PNG-FI', compression=6)  # 995 ms
-                except Exception as e:
-                    print(f"ImageIO: {e}")
-                    if callable(callback):
-                        return f'{e}'
-                    else:
-                        continue
+                #     It is deprecated and will be kicked out of ImageIO soon.
+                #     imageio-freeimage pypi package does not build/install.
+                #     dll download fails on Windows.
+                #import imageio
+                #try:
+                #    imageio.plugins.freeimage.download()  # once to install the lib
+                #    iio.imwrite(out_fn, array, plugin='PNG-FI', compression=6)  # 995 ms
+                #except Exception as e:
+                #    print(f"ImageIO: {e}")
+                #    if callable(callback):
+                #        return f'{e}'
+                #    else:
+                #        continue
             elif out_format == 'TIFF':
                 try:
                     iio.imwrite(out_fn, array, plugin='tifffile', compression="zlib", compressionargs={'level': 3}, predictor=True)

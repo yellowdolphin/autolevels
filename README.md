@@ -43,6 +43,7 @@ This will also install the following requirements if not found:
 - python-lcms2
 - imageio
 - tifffile
+- opencv-python-headless
 - h5py
 - onnxruntime
 

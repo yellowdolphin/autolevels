@@ -25,9 +25,7 @@ image_data = np.array([
 # Save 48bit image as PNG and TIFF
 PNG_IMAGE = "images/48bit_rgb.png"
 TIFF_IMAGE = "images/48bit_rgb.tiff"
-import imageio
-imageio.plugins.freeimage.download()  # once to install the lib
-iio.imwrite(PNG_IMAGE, image_data, plugin='PNG-FI', compression=6)
+iio.imwrite(PNG_IMAGE, image_data, plugin='opencv')
 iio.imwrite(TIFF_IMAGE, image_data, plugin='tifffile', compression="zlib", compressionargs={'level': 3}, predictor=True)
 
 # Images with ICC and MakerNote
