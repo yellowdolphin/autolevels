@@ -1202,7 +1202,9 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 #        continue
             elif out_format == 'TIFF':
                 try:
-                    iio.imwrite(out_fn, array, plugin='tifffile', compression="zlib", compressionargs={'level': 3}, predictor=True)
+                    iio.imwrite(out_fn, array, plugin='tifffile',
+                                compression="zlib", compressionargs={'level': 3}, predictor=True,
+                                metadata=None)  # avoid writing metadata to ImageDescription
                 except Exception as e:
                     print(f"ImageIO: {e}")
                     if callable(callback):
