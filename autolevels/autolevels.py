@@ -347,6 +347,31 @@ def next_free_path(folder: str | Path, stem: str, suf: str) -> Path:
     )
 
 
+def preview_resize(array, viewport):
+    """Resize array to fit inside viewport"""
+    image_height, image_width = array.shape[:2]
+    viewport_height, viewport_width = viewport
+
+    if image_width < viewport_width and image_height < viewport_height:
+        return array
+
+    ar_image = image_width / image_height
+    ar_viewport = viewport_width / viewport_height
+
+    if ar_image > ar_viewport:
+        new_width = viewport_width
+        new_height = int(new_width / ar_image)
+    else:
+        new_height = viewport_height
+        new_width = int(new_height * ar_image)
+
+    #resample = Image.NEAREST         # 450 ms
+    #resample = Image.Resampling.BOX  # 760 ms
+    resample = Image.BILINEAR         # 680 ms
+
+    return np.asarray(Image.fromarray(array).resize((new_width, new_height), resample=resample))
+
+
 def detect_image_format(path: str | Path) -> str | None:
     with open(path, "rb") as f:
         header = f.read(32)
@@ -705,7 +730,7 @@ def make_comment(pil_info, version, cli_params):
     return '\n'.join(comments)
 
 
-def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=False):
+def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=False, viewport=None):
     """Pass callback when processing multiple files with a curve model.
 
     Args:
@@ -716,6 +741,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         loaded_model (PyTorch, tensorflow, or onnx model as returned by inference.get_model)
         argv (list): command line args to use instead of sys.argv[1:]
         images (list): images as BytesIO objects
+        viewport (None or (int, int)): height, width of preview image
 
     Returns:
         bytes (image) if return_bytes, else
@@ -932,7 +958,15 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     else:
                         continue
         #t1 = perf_counter()
-        #print(f"{'Wall image read:':<30} {(t1 - t0) * 1000:.0f} ms")
+        #print(f"{'Wall image read:':<30} {(t1 - t0) * 1000:8.0f} ms")
+
+        # Accelerate preview: uint8-resize large images
+        if viewport:
+            if array.dtype.kind == 'f':
+                array = (array.clip(0, 1) * 255).astype(np.uint8)
+            elif array.dtype == np.uint16:
+                array = (array // 256).astype(np.uint8)
+            array = preview_resize(array, viewport)
 
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255 if array.dtype == np.dtype('uint8') else 1
         if array.ndim == 3 and array.shape[2] in {2, 4}:
@@ -1001,7 +1035,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
         if arg.model:
             #t2 = perf_counter()
-            #print(f"{'Wall ICC, float, alpha, gray:':<30} {(t2 - t1) * 1000:.0f} ms")
+            #print(f"{'Wall ICC, float, alpha, gray:':<30} {(t2 - t1) * 1000:8.0f} ms")
             # Simulate: just test inference on first image
             if arg.simulate and fn != fns[0]:
                 print(f'{fn} -> {out_fn}')
@@ -1026,7 +1060,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             #print(f"DEBUG: model_input: {model_input.shape} {model_input.dtype} {model_input.min()} {model_input.mean()} {model_input.max()}")
 
             #t3 = perf_counter()
-            #print(f"{'Wall model input:':<30} {(t3 - t2) * 1000:.0f} ms")
+            #print(f"{'Wall model input:':<30} {(t3 - t2) * 1000:8.0f} ms")
             invertible_intents = get_invertible_intents(input_icc_profile, is_grayscale)
             #print(f"DEBUG: invertible_intents: {invertible_intents}")
             if 'sRGB' in input_icc_profile.name or model_space == 'none':
@@ -1056,7 +1090,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             else:
                 raise ValueError(f"unknown model space adaptation: {model_space}")
             #t4 = perf_counter()
-            #print(f"{'Wall model inference:':<30} {(t4 - t3) * 1000:.0f} ms")
+            #print(f"{'Wall model inference:':<30} {(t4 - t3) * 1000:8.0f} ms")
 
             # Keep gray images gray
             if is_grayscale:
@@ -1094,7 +1128,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     continue
 
             #print(f"array before free_curve_map: {array.shape}")
-            array = free_curve_map_image(array, free_curve)  # float32, range (0, 1)
+            array = free_curve_map_image(array, free_curve)  # float32, range (0, 1), flatten gray
             #print(f"array after  free_curve_map: {array.shape}")
 
             if arg.simulate:
@@ -1143,13 +1177,17 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             array = array.astype(np.float32)
             shift = shift.astype(np.float32)
             stretch_factor = stretch_factor.astype(np.float32)
+            if is_grayscale:
+                shift = shift[0]
+                stretch_factor = stretch_factor[0]
             array = (array - shift * (maxvalue / 255)) * stretch_factor
-            if (shift < 0).any():
+            if not is_grayscale and (shift < 0).any():
                 # small gamma results in a low black point => upper limit for target_black!
                 channels = [name for name, s in zip('RGB', shift) if s < 0]
                 print(f'{fn} WARNING: lower black point or increase gamma for channel(s)', *channels)
 
             array = np.clip(array / maxvalue, 0, 1)
+            array = array[..., 0] if is_grayscale else array
 
         # Adjust saturation before gamma (deprecated)
         if (saturation != 1 and arg.saturation_before_gamma and not arg.saturation_first):
@@ -1158,6 +1196,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
         # Gamma correction
         if (gamma != 1).any():
+            # gamma can be scalar (np.float64) or array
+            gamma = gamma[0] if is_grayscale and isinstance(gamma, np.ndarray) else gamma
             array = array.clip(0, None)
             array = np.power(array, gamma)
 
@@ -1169,18 +1209,21 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         # Convert to output color space
         if profiles_differ(input_icc_profile, output_icc_profile):
             print(f"Converting image from {input_icc_profile.name} to {output_icc_profile.name}")
-            array = profile_to_profile(array, input_icc_profile, output_icc_profile, arg.rendering_intent)
+            array = profile_to_profile(array, input_icc_profile, output_icc_profile, arg.rendering_intent, uint8=bool(viewport))
         #else:
         #    print(f"DEBUG equivalent: {input_icc_profile.name} == {output_icc_profile.name}")
 
         #t5 = perf_counter()
-        #print(f"{'Wall adjust + convert:':<30} {(t5 - t4) * 1000:.0f} ms")
+        #print(f"{'Wall adjust + convert:':<30} {(t5 - t4 if 't4' in locals() else t1) * 1000:8.0f} ms")
         kwargs = {}  # TODO: allow user to set save options, fill kwargs accordingly for ImageIO/PIL
         if out_48bit:
             if not ('XYZ' in output_icc_profile.name or 'Lab' in output_icc_profile.name):
                 # Quantize to 16-bit
                 #print(array.dtype, array.shape, array.min(), array.max())
-                array = (array * 65535).round().clip(0, 65535).astype('uint16')
+                #array = (array * 65535).round().clip(0, 65535).astype('uint16')
+                array = (array.clip(0, 1) * 65535).astype('uint16')  # 33% faster
+
+            #t5a = t5b = perf_counter()
             if out_format == 'PNG':
                 # ImageIO by default cannot save 48-bit PNG (employs PIL for PNG). 2 Options:
                 # (A) opencv plugin: 50 MB extra package size for cv2, loads/saves reasonably fast
@@ -1204,6 +1247,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 try:
                     iio.imwrite(out_fn, array, plugin='tifffile',
                                 compression="zlib", compressionargs={'level': 3}, predictor=True,
+                                #compression=None,
                                 metadata=None)  # avoid writing metadata to ImageDescription
                 except Exception as e:
                     print(f"ImageIO: {e}")
@@ -1222,7 +1266,9 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                         continue
         else:
             # Quantize to 8-bit, continue with PIL Image
-            array = (array * 255).round().clip(0, 255).astype('uint8')
+            if array.dtype.kind == 'f':  # array may already be quantized
+                array = (array.clip(0, 1) * 255).round().astype('uint8')
+            #t5a = perf_counter()
             if array.ndim == 3 and array.shape[-1] == 1:
                 array = array[..., 0]  # PIL requires ndim 2 for gray images (mode L)
             img = Image.fromarray(array)
@@ -1277,6 +1323,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 comment = ''
                 kwargs['format'] = out_format
 
+            #t5b = perf_counter()
             try:
                 # Let PIL derive file format from extension
                 img.save(out_fn, comment=comment, optimize=True, **kwargs)
@@ -1318,9 +1365,11 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             return 'user abort'
 
         #t7 = perf_counter()
-        #print(f"{'Wall image save:':<30} {(t6 - t5) * 1000:.0f} ms")
-        #print(f"{'Wall metadata:':<30} {(t7 - t6) * 1000:.0f} ms")
-        #print(f"{'Wall total:':<30} {(t7 - t0) * 1000:.0f} ms")
+        #print(f"{'Wall quantize:':<30} {(t5a - t5) * 1000:8.0f} ms")
+        #print(f"{'Wall config:':<30} {(t5b - t5a) * 1000:8.0f} ms")
+        #print(f"{'Wall image save:':<30} {(t6 - t5b) * 1000:8.0f} ms")
+        #print(f"{'Wall metadata:':<30} {(t7 - t6) * 1000:8.0f} ms")
+        #print(f"{'Wall total:':<30} {(t7 - t0) * 1000:8.0f} ms")
 
 
 if __name__ == '__main__':
