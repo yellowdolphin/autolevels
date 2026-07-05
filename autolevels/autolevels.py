@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image, ImageFilter, JpegImagePlugin
 
 import imageio.v3 as iio
+import cv2
 from exiftool import ExifToolHelper
 from exiftool.exceptions import ExifToolExecuteError
 
@@ -365,11 +366,14 @@ def preview_resize(array, viewport):
         new_height = viewport_height
         new_width = int(new_height * ar_image)
 
+    # PIL 8-bit resize
     #resample = Image.NEAREST         # 450 ms
     #resample = Image.Resampling.BOX  # 760 ms
-    resample = Image.BILINEAR         # 680 ms
+    #resample = Image.BILINEAR        # 680 ms
+    #return np.asarray(Image.fromarray(array).resize((new_width, new_height), resample=resample))
 
-    return np.asarray(Image.fromarray(array).resize((new_width, new_height), resample=resample))
+    # cv2 16-bit resize                 400 ms 394 438 445
+    return cv2.resize(array, (new_width, new_height), cv2.INTER_AREA)
 
 
 def detect_image_format(path: str | Path) -> str | None:
@@ -961,16 +965,26 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         #print(f"{'Wall image read:':<30} {(t1 - t0) * 1000:8.0f} ms")
 
         # Accelerate preview: uint8-resize large images
+        preview_16bit = True
         if viewport:
             if array.dtype.kind == 'f':
-                array = (array.clip(0, 1) * 255).astype(np.uint8)
-            elif array.dtype == np.uint16:
+                if preview_16bit:
+                    array = (array.clip(0, 1) * 65535).astype(np.uint16)
+                else:
+                    array = (array.clip(0, 1) * 255).astype(np.uint8)
+            elif array.dtype == np.uint16 and preview_16bit is False:
                 array = (array // 256).astype(np.uint8)
             array = preview_resize(array, viewport)
+
+        #t1a = perf_counter()
+        #print(f"{'Wall preview resize':<30} {(t1a - t1) * 1000:8.0f} ms")
 
         maxvalue = 65535 if array.dtype == np.dtype('uint16') else 255 if array.dtype == np.dtype('uint8') else 1
         if array.ndim == 3 and array.shape[2] in {2, 4}:
             image_alpha = array[:, :, -1]
+
+        #t1b = perf_counter()
+        #print(f"{'Wall floatify':<30} {(t1b - t1a) * 1000:8.0f} ms")
 
         # Get ICC profile from input file if no global ICC file was specified, fallback: sRGB
         input_icc_profile = arg.input_icc_profile or get_icc_profile(fn, add_tags=True) or get_icc_profile('sRGB', add_tags=True)
@@ -1035,7 +1049,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
         if arg.model:
             #t2 = perf_counter()
-            #print(f"{'Wall ICC, float, alpha, gray:':<30} {(t2 - t1) * 1000:8.0f} ms")
+            #print(f"{'Wall ICC, float, alpha, gray:':<30} {(t2 - t1b) * 1000:8.0f} ms")
             # Simulate: just test inference on first image
             if arg.simulate and fn != fns[0]:
                 print(f'{fn} -> {out_fn}')
@@ -1043,15 +1057,22 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
 
             # Resize and floatify model input before conversion to sRGB
             #print(f"DEBUG: model_input before resize: {array.dtype} {array.shape} {array.mean(axis=(0, 1))}")
-            model_input = array.astype(np.float32) / maxvalue
-            resized = []
-            for channel in model_input.transpose(2, 0, 1):
-                pil_channel = Image.fromarray(channel, mode='F')
-                resized_channel = pil_channel.resize((384, 384), resample=Image.NEAREST)
-                resized.append(np.array(resized_channel))
-                #print(f"input channel mean: {channel.mean():8.4f}")
-                #print(f"resized mean:       {resized[-1].mean():8.4f}")
-            model_input = np.stack(resized, axis=2)
+            # cv2-resize at 16-bit, then floatify (much faster!)
+            model_input = array.astype(np.uint16) * 256 if array.dtype == np.uint8 else array
+            model_input = cv2.resize(model_input, (384, 384), cv2.INTER_AREA)  # uint16 or float
+            model_input = model_input.astype(np.float32) / 65535 if model_input.dtype == np.uint16 else model_input.astype(np.float32)
+            model_input = model_input[..., None] if model_input.ndim == 2 else model_input
+
+            # Floatify and PIL-resize
+            #model_input = array.astype(np.float32) / maxvalue
+            #resized = []
+            #for channel in model_input.transpose(2, 0, 1):
+            #    pil_channel = Image.fromarray(channel, mode='F')
+            #    resized_channel = pil_channel.resize((384, 384), resample=Image.NEAREST)
+            #    resized.append(np.array(resized_channel))
+            #    #print(f"input channel mean: {channel.mean():8.4f}")
+            #    #print(f"resized mean:       {resized[-1].mean():8.4f}")
+            #model_input = np.stack(resized, axis=2)
             #print(f"DEBUG: model_input from after resize: {model_input.dtype} {model_input.shape} {model_input.mean(axis=(0, 1))}")
 
             # Convert grayscale to RGB
@@ -1207,9 +1228,12 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             array = blend(array, L, saturation)
 
         # Convert to output color space
+        # With options uint8, uint16, array is returned quantized!
         if profiles_differ(input_icc_profile, output_icc_profile):
             print(f"Converting image from {input_icc_profile.name} to {output_icc_profile.name}")
-            array = profile_to_profile(array, input_icc_profile, output_icc_profile, arg.rendering_intent, uint8=bool(viewport))
+            array = profile_to_profile(array, input_icc_profile, output_icc_profile, arg.rendering_intent,
+                                       uint8=(viewport and not preview_16bit),
+                                       uint16=(viewport and preview_16bit))
         #else:
         #    print(f"DEBUG equivalent: {input_icc_profile.name} == {output_icc_profile.name}")
 
@@ -1217,7 +1241,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         #print(f"{'Wall adjust + convert:':<30} {(t5 - t4 if 't4' in locals() else t1) * 1000:8.0f} ms")
         kwargs = {}  # TODO: allow user to set save options, fill kwargs accordingly for ImageIO/PIL
         if out_48bit:
-            if not ('XYZ' in output_icc_profile.name or 'Lab' in output_icc_profile.name):
+            if array.dtype.kind == 'f':
                 # Quantize to 16-bit
                 #print(array.dtype, array.shape, array.min(), array.max())
                 #array = (array * 65535).round().clip(0, 65535).astype('uint16')
@@ -1268,6 +1292,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             # Quantize to 8-bit, continue with PIL Image
             if array.dtype.kind == 'f':  # array may already be quantized
                 array = (array.clip(0, 1) * 255).round().astype('uint8')
+            elif array.dtype == np.uint16:
+                array = (array // 256).astype(np.uint8)
             #t5a = perf_counter()
             if array.ndim == 3 and array.shape[-1] == 1:
                 array = array[..., 0]  # PIL requires ndim 2 for gray images (mode L)
