@@ -545,7 +545,7 @@ def convert_curve_profile(curve, input_icc_profile, working_profile, rendering_i
     return curve.transpose(1, 2, 0).reshape(1, 1, 768).astype(np.float32).clip(0, 1)
 
 
-def profile_to_profile(array, source_profile, target_profile, rendering_intent='perceptual', uint8=False):
+def profile_to_profile(array, source_profile, target_profile, rendering_intent='perceptual', uint8=False, uint16=False):
     """Convert image data from one color profile to another using lcms2.
 
     Args:
@@ -596,6 +596,9 @@ def profile_to_profile(array, source_profile, target_profile, rendering_intent='
     if uint8:
         dtype_suffix = '8'
         array = (array.clip(0, 1) * 255).astype(np.uint8)
+    elif uint16:
+        dtype_suffix = '16'
+        array = (array.clip(0, 1) * 65535).astype(np.uint16)
 
     try:
         transform = lcms2.Transform(source_profile, f"{source_profile_space}_{dtype_suffix}",
