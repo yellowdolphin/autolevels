@@ -210,20 +210,23 @@ def profiles_differ(left_profile, right_profile):
         if left_profile.tags['pcs'] != right_profile.tags['pcs']:
             return True
 
-        # Consider all variants of sRGB equivalent (too sloppy?)
-        if all('sRGB' in p.name for p in (left_profile, right_profile)):
-            return False
-
-        # Consider all variants of "Adobe RGB (1998)" equivalent
-        if all('Adobe RGB' in p.name for p in (left_profile, right_profile)):
-            return False
-
     # Compare DescriptionTag's but ignore some appendices like " (our version)"
     descriptions = [p.name for p in (left_profile, right_profile)]
     descriptions = [d.replace(' built-in', '') for d in descriptions]
     descriptions = [re.sub(r" \(.*\)", "", d) for d in descriptions]
 
-    return descriptions[0] != descriptions[1]
+    if descriptions[0] == descriptions[1]:
+        return False
+
+    # Probe mini color chart to avoid sRGB -> sRGB conversions (takes 6 ms)
+    colorchart = np.array([[[10, 10, 10], [240, 10, 10], [10, 240, 10], [10, 10, 240],
+                            [128, 128, 128], [240, 240, 10], [240, 10, 240], [10, 240, 240]]], dtype=np.uint8)
+    try:
+        converted = profile_to_profile(colorchart.astype(np.float32) / 255, left_profile, right_profile, uint8=True)
+    except Exception:
+        return True
+    diff = (converted.astype(np.int16) - colorchart.astype(np.int16))
+    return True if np.abs(diff).max() > 1 else False  # ignore roundtrip rounding error of V4 profiles
 
 
 def decode_trc(raw):
@@ -481,7 +484,7 @@ def infer_gamma(icc_profile):
     if icc_profile.name in GAMMA_24_BUILTIN:
         return 2.4
 
-    # Infer gamma by converting middle gray from icc_profile to sRGB
+    # Infer gamma by converting middle gray from icc_profile to Adobe RGB (1998)
     ref_profile = get_icc_profile('Adobe RGB (1998)')
     x = np.array([[[0.5, 0.5, 0.5]]])
     trc = profile_to_profile(x, icc_profile, ref_profile)
@@ -533,6 +536,12 @@ def convert_curve_profile(curve, input_icc_profile, working_profile, rendering_i
     #print(curve_y_rgb[::64, 0, :])
     #print()
 
+    # Handle grayscale images: GRAY profile -> (256, 1) instead of (256, 1, 3)
+    if curve_x_rgb.ndim == 2:
+        assert curve_y_rgb.ndim == 2, f'shape mismatch between curve_x {curve_x_rgb.shape} and curve_y {curve_y_rgb.shape}'
+        curve_x_rgb = np.tile(curve_x_rgb[..., None], (1, 1, 3))
+        curve_y_rgb = np.tile(curve_y_rgb[..., None], (1, 1, 3))
+
     # Resample to grid points
     curve = np.stack([np.interp(grid_points[:, :, c], curve_x_rgb[:, 0, c], curve_y_rgb[:, 0, c]) for c in range(3)], axis=-1)
     #print("interpolated curve_y:")
@@ -542,7 +551,7 @@ def convert_curve_profile(curve, input_icc_profile, working_profile, rendering_i
     #print(f"DEBUG: curve stats after inv_trc: {curve.min()} {curve.max()} {curve.mean()}")
     #np.savez("trcs2.npz", curve_x_rgb=grid_points, curve_y_rgb=curve)
 
-    return curve.transpose(1, 2, 0).reshape(1, 1, 768).astype(np.float32).clip(0, 1)
+    return curve.clip(0, 1).transpose(1, 2, 0).reshape(1, 1, 768).astype(np.float32)
 
 
 def profile_to_profile(array, source_profile, target_profile, rendering_intent='perceptual', uint8=False, uint16=False):

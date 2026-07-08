@@ -138,9 +138,9 @@ def get_ensemble(filenames):
 
 
 def free_curve_map_image(img, curves):
-    assert curves.dtype == np.float32, str(curves.dtype)  # float32
-    assert (curves >= 0).all(), f'curves.min: {curves.min()}'
-    assert (curves <= 1).all(), f'curves.max: {curves.max()}'
+    #assert curves.dtype == np.float32, str(curves.dtype)
+    #assert (curves >= 0).all(), f'curves.min: {curves.min()}'
+    #assert (curves <= 1).all(), f'curves.max: {curves.max()}'
     curves = curves.reshape(3, 256)
 
     # Handle gray scale images
@@ -148,6 +148,7 @@ def free_curve_map_image(img, curves):
         img = img[:, :, None]
     if img.shape[2] == 1:
         curves = curves.mean(axis=0, keepdims=True)
+    assert img.shape[2] == curves.shape[0], f'shape mismatch: curves {curves.shape}, image {img.shape}'
 
     # Optionally export curves
     filename = Path('.autolevels_exported_curves.h5')

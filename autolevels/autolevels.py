@@ -1075,21 +1075,23 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             #model_input = np.stack(resized, axis=2)
             #print(f"DEBUG: model_input from after resize: {model_input.dtype} {model_input.shape} {model_input.mean(axis=(0, 1))}")
 
-            # Convert grayscale to RGB
-            if is_grayscale:
-                model_input = np.tile(model_input, (1, 1, 3))
+            # Convert grayscale to RGB: no, after profile_to_profile, embedded GRAY ICC can only be assigned to 1-channel image!
+            #if is_grayscale:
+            #    model_input = np.tile(model_input, (1, 1, 3))
             #print(f"DEBUG: model_input: {model_input.shape} {model_input.dtype} {model_input.min()} {model_input.mean()} {model_input.max()}")
 
             #t3 = perf_counter()
             #print(f"{'Wall model input:':<30} {(t3 - t2) * 1000:8.0f} ms")
             invertible_intents = get_invertible_intents(input_icc_profile, is_grayscale)
             #print(f"DEBUG: invertible_intents: {invertible_intents}")
-            if 'sRGB' in input_icc_profile.name or model_space == 'none':
+            srgb_profile = get_icc_profile('sRGB')
+            if model_space == 'none' or not profiles_differ(input_icc_profile, srgb_profile):
+                if is_grayscale:
+                    model_input = np.tile(model_input, (1, 1, 3))
                 free_curve = model(model_input)
                 #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save(f'{arg.outdir}/debug.png')
                 #print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
             elif model_space == 'srgb' and invertible_intents:
-                srgb_profile = get_icc_profile('sRGB')
                 rendering_intent = (
                     'relative_colorimetric' if 'relative_colorimetric' in invertible_intents else
                     invertible_intents.pop())
@@ -1097,6 +1099,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 model_input = profile_to_profile(model_input, input_icc_profile, srgb_profile, rendering_intent)
                 #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save(f'{arg.outdir}/debug.png')
                 #print(f"DEBUG: wrote model input to {arg.outdir}/debug.png")
+                assert model_input.ndim == 3 and model_input.shape[-1] == 3, f'bad model_input shape: {model_input.shape}'
                 free_curve = model(model_input)
                 free_curve = convert_curve_profile(free_curve, input_icc_profile, srgb_profile, rendering_intent)
             elif model_space == 'gamma' or not invertible_intents:
@@ -1106,16 +1109,14 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 model_input = np.power(model_input, input_gamma / 2.2)
                 #Image.fromarray((model_input.clip(0, 1) * 255).astype(np.uint8)).save('debug.png')
                 #print("DEBUG: wrote model input to debug.png")
+                if is_grayscale:
+                    model_input = np.tile(model_input, (1, 1, 3))
                 free_curve = model(model_input)
                 free_curve = convert_curve_gamma(free_curve, input_gamma)
             else:
                 raise ValueError(f"unknown model space adaptation: {model_space}")
             #t4 = perf_counter()
             #print(f"{'Wall model inference:':<30} {(t4 - t3) * 1000:8.0f} ms")
-
-            # Keep gray images gray
-            if is_grayscale:
-                free_curve = np.tile(free_curve.reshape(1, 3, 256).mean(axis=1, keepdims=True), (1, 1, 3))
 
             # Export curves to supported programs
             if arg.export == 'darktable' or out_fn.suffix.endswith('.xmp'):
@@ -1148,9 +1149,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                     print(f'{fn} -> {xmp_file}')
                     continue
 
-            #print(f"array before free_curve_map: {array.shape}")
-            array = free_curve_map_image(array, free_curve)  # float32, range (0, 1), flatten gray
-            #print(f"array after  free_curve_map: {array.shape}")
+            array = free_curve_map_image(array, free_curve)  # float32, range (0, 1), flatten gray image
 
             if arg.simulate:
                 print(f'{fn} -> {out_fn}')
