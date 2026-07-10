@@ -340,7 +340,7 @@ def decode_trc(raw):
                 raise ValueError(f"bad ICC profile: type 4 parametric curve must have d >= -b / a, got d={d}, -b/a={-b/a}")
             return get_7p_trc(g, a, b, c, d, e, f)
 
-    print("DEBUG para:", len(sig), type(sig), sig == 'para')
+    #print("DEBUG para:", len(sig), type(sig), sig == 'para')
     raise NotImplementedError(f"cannot decode TRC of type {sig}")
 
 

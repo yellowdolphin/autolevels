@@ -803,7 +803,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             arg.input_icc_profile = profile
         else:
             return f'Error: "{arg.input_icc_profile}" not found and not a built-in profile'
-        print(f"DEBUG: global source ICC profile: {arg.input_icc_profile.name}")
+        #print(f"DEBUG: global source ICC profile: {arg.input_icc_profile.name}")
     if arg.output_icc_profile:
         # Set global profile for all output images
         profile = get_icc_profile(arg.output_icc_profile, add_tags=True)
@@ -811,7 +811,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             arg.output_icc_profile = profile
         else:
             return f'Error: "{arg.output_icc_profile}" not found and not a built-in profile'
-        print(f"DEBUG: global target ICC profile: {arg.output_icc_profile.name}")
+        #print(f"DEBUG: global target ICC profile: {arg.output_icc_profile.name}")
     model_space = arg.model_space.lower()
     if model_space not in {'none', 'srgb', 'gamma'}:
         return f'Error: invalid model space {arg.model_space}'
@@ -989,8 +989,8 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         # Get ICC profile from input file if no global ICC file was specified, fallback: sRGB
         input_icc_profile = arg.input_icc_profile or get_icc_profile(fn, add_tags=True) or get_icc_profile('sRGB', add_tags=True)
         output_icc_profile = arg.output_icc_profile or input_icc_profile
-        print(f"DEBUG: Input  ICC profile: {input_icc_profile.name}")
-        print(f"DEBUG: Output ICC profile: {output_icc_profile.name}")
+        #print(f"DEBUG: Input  ICC profile: {input_icc_profile.name}")
+        #print(f"DEBUG: Output ICC profile: {output_icc_profile.name}")
 
         # Check conditions for 48-bit output
         out_48bit = all((array.dtype == np.dtype('uint16'),
@@ -1103,7 +1103,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 free_curve = model(model_input)
                 free_curve = convert_curve_profile(free_curve, input_icc_profile, srgb_profile, rendering_intent)
             elif model_space == 'gamma' or not invertible_intents:
-                print("DEBUG: adapting gamma of model input")
+                #print("DEBUG: adapting gamma of model input")
                 # Infer gamma of input_color_space
                 input_gamma = infer_gamma(input_icc_profile)
                 model_input = np.power(model_input, input_gamma / 2.2)
