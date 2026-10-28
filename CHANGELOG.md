@@ -1,4 +1,11 @@
 # Changelog
+### v1.4.0
+Release date: 2026-10-28
+- adds ICC color management (lcms2)
+- fixes some exiftool bugs
+- drop Python 3.9 support
+- support for RetroShine 1.3
+
 ### v1.3.6
 Release date: 2026-05-09
 - Don't write "\_original" files
