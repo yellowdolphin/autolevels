@@ -1386,8 +1386,13 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         print(', '.join(infos))
 
         # Call callback for user-abort feature
-        if callable(callback) and callback(str(fn), True, infos) is False:
-            return 'user abort'
+        if callable(callback):
+            try:
+                status = callback(str(fn), True, infos)
+            except Exception as e:
+                return f'callback error: {e}'
+            if status is False:
+                return 'user abort'
 
         #t7 = perf_counter()
         #print(f"{'Wall quantize:':<30} {(t5a - t5) * 1000:8.0f} ms")
