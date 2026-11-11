@@ -93,7 +93,7 @@ def get_model(filename):
     elif Path(filename).suffix == '.onnx':
         import onnxruntime as ort
 
-        ort_sess = ort.InferenceSession(filename)
+        ort_sess = ort.InferenceSession(filename, providers=["CPUExecutionProvider"])
 
         def model(inputs):
             # channels-first, add batch dim, floatify
