@@ -596,7 +596,7 @@ def test_darktable_icc(simulate, tmp_path):
         'darktable': 'http://darktable.sf.net/',
         'xmpMM': 'http://ns.adobe.com/xap/1.0/mm/',
     }
-    from autolevels.export import local_name
+    from autolevels.export.darktable import local_name
     import xml.etree.ElementTree as ET
 
     tree = ET.parse(OUTPUT_XMP_PATH)

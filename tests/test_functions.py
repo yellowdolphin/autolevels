@@ -1,8 +1,9 @@
 import pytest
 from autolevels import make_comment
 from autolevels.autolevels import next_free_path
-from autolevels.export import (fit_rgb_curves, compute_monotone_hermite_slopes, hermite_eval, create_basic_xmp, 
-                               check_missing, append_rgbcurve_history_item, local_name, check_darktable_version)
+from autolevels.export.darktable import (
+    fit_rgb_curves, compute_monotone_hermite_slopes, hermite_eval,
+    create_basic_xmp, check_missing, append_rgbcurve_history_item, local_name, check_darktable_version)
 from autolevels.icc.icc import get_icc_profile
 from autolevels import process_channel
 from PIL import Image
@@ -219,7 +220,7 @@ def test_append_rgbcurve_history_item():
 @pytest.mark.parametrize(
     "existing, expected",
     [
-        ([], "test_al0.jpg"),
+        ([], "test_al1.jpg"),
         (["test_al9.jpg"], "test_al10.jpg"),
         (["test_al10.jpg"], "test_al11.jpg"),
     ],

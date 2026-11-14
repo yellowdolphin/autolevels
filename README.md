@@ -145,7 +145,7 @@ This leaves you with defining input and output files and paths. AutoLevels gives
 
    This will read files `orig/scn1.jpg ...` and write `processed/img_0001.jpg ...` to disk.
 
-### Exporting darktable XMP files
+### Exporting darktable XMP sidecar files
 
 You can use AutoLevels as an automatic preprocessing step in a professional, non-destructive workflow using [darktable](https://www.darktable.org). The idea is to establish a baseline color correction with the `--model` option and export the curves to darktable, where you can fine-tune them or proceed with your normal darktable workflow.
 
@@ -156,9 +156,57 @@ You might notice that the _rgb curve_ instance created by AutoLevels is applied 
 Under the hood, the Lua script calls `autolevels` with the `--export darktable <version>` argument:
 
 ```bash
-autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export darktable 5.3.0 --outsuffix .jpg.xmp -- myimage.jpg
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export darktable 5.3.0 --outsuffix .*.xmp -- myimage.jpg
 ```
 
 AutoLevels reads the XMP sidecar file associated with each selected image (or duplicate). It is passed via the `--outsuffix` option. If the XMP file does not exist, AutoLevels will create a minimal one with the default auto-apply presets. The `--outsuffix` option is optional and prevents AutoLevels from creating an output image if its value ends with ".xmp".
 
 If you want to call AutoLevels with the `--export darktable` option outside of darktable, note that darktable only reads XMP files on import if you have activated the `look for updated XMP files on startup` option in preferences/storage.
+
+### Exporting RawTherapee PP3 sidecar files
+
+AutoLevels can read and write PP3 files associated with an image file. To export RGB curves predicted by the color correction model into RawTherapee, call it with the `--export rawtherapee` option. This reads an existing .pp3 file or creates a new one and adds an `[RGB Curves]` section to it:
+
+```bash
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export rawtherapee --outsuffix .*.pp3 -- myimage.jpg
+```
+
+When you now open the image in RawTherapee, it appears with ☑ and you will find the exported curves in the _RGB Curves_ widget in the Color tab.
+
+If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
+
+### Exporting to Adobe Lightroom-compatible XMP files
+
+AutoLevels can export RGB curves predicted by the color correction model to an XMP file that can be imported in Adobe Lightroom Classic as a develop preset. Call AutoLevels with the `--export lightroom` option:
+
+```bash
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export lightroom --outsuffix .lightroom.xmp -- myimage.jpg
+```
+
+This will produce the output file `myimage.lightroom.xmp`. Open the image in Lightroom, then import the XMP file as a preset and select it. The color correction curves will be applied to the image.
+
+If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
+
+### Exporting ACV curve files
+
+AutoLevels can export RGB curves predicted by the color correction model in the ACV format, which can be read by many photo editors like [GIMP](https://www.gimp.org/) or [Adobe Photoshop](https://www.adobe.com/products/photoshop.html). Call AutoLevels with the `--export acv` option:
+
+```bash
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export acv --outsuffix .acv -- myimage.jpg
+```
+
+This produces a `myimage.acv` file. Open your image in GIMP 3.2 or later, open Colors → Curves..., then click on the "◀" (Manage presets) button right to the Presets selector and choose _Import Current Settings from File..._. Search for the exported ACV file and open it. The RGB curves have been loaded and you can edit them by selecting a _Channel_.
+
+If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
+
+### Exporting 1D LUT (lookup tables) .cube files
+
+AutoLevels can export RGB curves predicted by the color correction model as 1D LUT in the .cube text format. Call AutoLevels with the `--export cube` option:
+
+```bash
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export cube --outsuffix .cube -- myimage.jpg
+```
+
+This produces a `myimage.cube` file. It can be read by apps that support 1D LUT files. 3D LUT support is not sufficient. 
+
+If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.

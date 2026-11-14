@@ -19,6 +19,8 @@ import cv2
 from exiftool import ExifToolHelper
 from exiftool.exceptions import ExifToolExecuteError
 
+from .export.common import EXPORT_FORMATS
+
 from autolevels.icc.icc import (get_icc_profile, get_invertible_intents, profile_to_profile,
                                 infer_gamma, convert_curve_gamma, convert_curve_profile, profiles_differ)
 
@@ -189,7 +191,14 @@ def get_parser():
         '--export', nargs='+', action='store', default=None, help=(
             'Export curves to supported programs. '
             '"darktable": Append rgb curve to history of an existing darktable XMP file. You can skip image output '
-            'by specifying an OUTSUFFIX or OUTFSTRING ending with ".xmp".'))
+            'by specifying an OUTSUFFIX or OUTFSTRING ending with ".xmp". '
+            '"rawtherapee": partial PP3 profile; '
+            '"lightroom": Adobe XMP preset; '
+            '"acv": ACV curves (gimp); '
+            '"cube": 3D CUBE LUT. '
+            'These write beside the output image; use the matching output extension to export only. '
+            'Exports require --model and contain inferred curves before gamma/saturation/output conversion. '
+            'Only darktable accepts an optional version after the format.'))
 
     parser.add_argument(
         '--version', action='store_true', help='Print version information and exit')
@@ -787,11 +796,15 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
     gamma = 1 / np.array(arg.gamma, dtype=float)
     export_version = None
     if arg.export:
-        supported_exports = {'darktable', }
+        supported_exports = {'darktable', *EXPORT_FORMATS}
         export_version = arg.export[1] if len(arg.export) > 1 else None
+        if len(arg.export) > 2 or (arg.export[0] != 'darktable' and len(arg.export) > 1):
+            return 'Error: --export accepts one format; only darktable accepts a version'
         arg.export = arg.export[0]
         if arg.export not in supported_exports:
             return f'Error: invalid export {arg.export}, must be one of {supported_exports}'
+    if arg.export in EXPORT_FORMATS and not arg.model:
+        return 'Error: --export requires --model'
     exiftool_path = arg.exiftool or shutil.which('exiftool')
     if arg.model:
         for fn in arg.model:
@@ -915,8 +928,10 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 suf = arg.outsuffix or f'_al{ext}'
             if '.' not in suf:
                 suf += ext  # add missing extension
+            if '.*' in suf:
+                suf = suf.replace('.*', ext)  # replace ".*" by input file extension
             if '?' in suf:
-                out_fn = next_free_path(outdir or fn.parent, stem, suf)
+                out_fn = next_free_path(outdir or fn.parent, stem, suf)  # replace "_??" by "_00"
             else:
                 out_fn = (outdir or fn.parent) / f'{stem}{suf}'
 
@@ -1136,35 +1151,53 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             #print(f"{'Wall model inference:':<30} {(t4 - t3) * 1000:8.0f} ms")
 
             # Export curves to supported programs
-            if arg.export == 'darktable' or out_fn.suffix.endswith('.xmp'):
-                from .export import append_rgbcurve_history_item
+            export_extensions = set(EXPORT_FORMATS.values()) | {'.xmp'}
+            skip_image_output = True if out_fn.suffix in export_extensions or arg.simulate else False
+            if arg.export in EXPORT_FORMATS:
+                # Check suffix matches exporter
+                expected_suffix = EXPORT_FORMATS[arg.export]
+                if out_fn.suffix in export_extensions and not out_fn.name.lower().endswith(expected_suffix):
+                    return f'{arg.export} export expects suffix "{expected_suffix}", not "{out_fn.suffix}"'
 
-                # darktable xmp suffixes: .png.xmp (default), _01.png.xmp (via outsuffix, outfstring)
-                if out_fn.suffix.endswith('.xmp'):
-                    xmp_file = out_fn
-                    skip_image_output = True
-                else:
-                    xmp_file = fn.with_name(fn.name + '.xmp')
-                    skip_image_output = False
+                from .export import export_curves
+                try:
+                    export_curves(arg.export, out_fn, free_curve,
+                                  grayscale=is_grayscale, simulate=arg.simulate)
+                except Exception as e:
+                    print(f'Error: {arg.export} export failed: {e}; continuing image output.')
+
+            elif arg.export == 'darktable' or (out_fn.suffix == '.xmp' and not out_fn.stem.endswith('.lightroom')):
+                # Darktable XMP export
+                from .export.darktable import append_rgbcurve_history_item
+
+                # Darktable XMP suffixes: either .png.xmp (default) or _01.png.xmp (via outsuffix, outfstring)
+                xmp_file = out_fn if out_fn.suffix.endswith('.xmp') else fn.with_name(fn.name + '.xmp')
+
+                # Output XMP or both XMP + image
+                out_fn = xmp_file if skip_image_output else out_fn
 
                 try:
-                    if arg.simulate:
-                        skip_image_output = True
-                    else:
+                    if not arg.simulate:
                         # icc_path is ignored if xmp_file exists, otherwise considered for xmp generation
                         icc_path = arg.input_icc_profile.path if arg.input_icc_profile else None
                         append_rgbcurve_history_item(xmp_file, free_curve, fn, exif,
-                                                     icc_profile=input_icc_profile,
-                                                     export_version=export_version)
+                                                    icc_profile=input_icc_profile,
+                                                    export_version=export_version)
                 except Exception as e:
                     print(f'Error: failed generating {xmp_file}, skipping darktable export.')
                     print(e)  # DEBUG
                     if skip_image_output:
                         continue
 
-                if skip_image_output:
-                    print(f'{fn} -> {xmp_file}')
-                    continue
+            if skip_image_output:
+                if callable(callback):
+                    try:
+                        status = callback(str(fn), True, f'{fn} -> {out_fn}')
+                    except Exception as e:
+                        return f'callback error: {e}'
+                    if status is False:
+                        return 'user abort'
+                continue
 
             array = free_curve_map_image(array, free_curve)  # float32, range (0, 1), flatten gray image
 

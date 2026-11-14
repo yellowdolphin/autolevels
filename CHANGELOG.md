@@ -1,10 +1,20 @@
 # Changelog
+
+### v1.5.0
+Release date: 2026-11-15
+- RawTherapee PP3 partial profile export
+- ACV export
+- Export of Adobe Lightroom-compatible XMP presets
+- 1D LUT .cube export
+- New --roi (region of interest) option
+- Support for RetroShine 1.4
+
 ### v1.4.0
 Release date: 2026-10-28
-- adds ICC color management (lcms2)
-- fixes some exiftool bugs
-- drop Python 3.9 support
-- support for RetroShine 1.3
+- Adds ICC color management (lcms2)
+- Fixes some exiftool bugs
+- Drop Python 3.9 support
+- Support for RetroShine 1.3
 
 ### v1.3.6
 Release date: 2026-05-09
