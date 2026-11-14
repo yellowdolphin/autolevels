@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__ = '1.4.0'
+__version__ = '1.5.0'
 
 from pathlib import Path
 from argparse import ArgumentParser

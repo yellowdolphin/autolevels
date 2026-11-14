@@ -171,7 +171,7 @@ AutoLevels can read and write PP3 files associated with an image file. To export
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export rawtherapee --outsuffix .*.pp3 -- myimage.jpg
 ```
 
-When you now open the image in RawTherapee, it appears with ☑ and you will find the exported curves in the _RGB Curves_ widget in the Color tab.
+When you now open the image in RawTherapee, it appears with ☑ and you will find the exported curves in the _RGB Curves_ widget in the _Color_ tab.
 
 If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
 
@@ -195,7 +195,7 @@ AutoLevels can export RGB curves predicted by the color correction model in the 
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export acv --outsuffix .acv -- myimage.jpg
 ```
 
-This produces a `myimage.acv` file. Open your image in GIMP 3.2 or later, open Colors → Curves..., then click on the "◀" (Manage presets) button right to the Presets selector and choose _Import Current Settings from File..._. Search for the exported ACV file and open it. The RGB curves have been loaded and you can edit them by selecting a _Channel_.
+This produces a `myimage.acv` file. Open your image in GIMP 3.2 or later, open Colors → Curves..., then click on the ◀ (Manage presets) button right to the Presets selector and choose _Import Current Settings from File..._. Search for the exported ACV file and open it. The RGB curves have been loaded and you can edit them by selecting a _Channel_.
 
 If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
 
