@@ -334,7 +334,7 @@ def next_free_path(folder: str | Path, stem: str, suf: str) -> Path:
         rf"{re.escape(suffix)}$"
     )
 
-    max_num = -1
+    max_num = 0  # start with 1 (darktable duplicates convention)
 
     for path in folder.glob(f"{stem}{glob_suf}"):
         m = pattern.match(path.name)
