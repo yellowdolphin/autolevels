@@ -8,6 +8,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import re
+import math
 #from time import perf_counter
 
 import numpy as np
@@ -95,6 +96,10 @@ def get_parser():
                                 '"perceptive" does the same with a weighted histogram, which is slower but can '
                                 'improve the blackpoint of images with color cast. Use --simulate to check the '
                                 'measured black and white points before and after processing.'))
+    bp_mode.add_argument(
+        '--roi', nargs=4, type=float, default=[0.0, 1.0, 0.0, 1.0], help=(
+                                'Region of interest for image statistics and curve prediction. Four normalized box coordinates, '
+                                'default: (0.0, 1.0, 0.0, 1.0).'))
 
     curve = parser.add_argument_group('Curve corrections')
     curve.add_argument(
@@ -771,6 +776,7 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
         assert hasattr(arg, 'cli_params'), 'merge_args deleted cli_params'
         print(f'Reproducing {arg.reproduce} processing: {arg.cli_params}')
     sample_mode = arg.mode
+    roi = arg.roi if arg.roi != [0.0, 1.0, 0.0, 1.0] else None
     blackclip = np.array(arg.blackclip, dtype=float)
     max_blackshift = np.array(arg.max_blackshift, dtype=int)
     whiteclip = np.array(arg.whiteclip, dtype=float)
@@ -1059,6 +1065,17 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
             #print(f"DEBUG: model_input before resize: {array.dtype} {array.shape} {array.mean(axis=(0, 1))}")
             # cv2-resize at 16-bit, then floatify (much faster!)
             model_input = array.astype(np.uint16) * 256 if array.dtype == np.uint8 else array
+            if roi and all(math.isfinite(v) for v in roi):
+                # Crop to region of interest
+                x0, x1, y0, y1 = roi
+                h, w = model_input.shape[:2]
+
+                left = max(0, min(w - 1, math.floor(x0 * w)))
+                right = max(left + 1, min(w, math.ceil(x1 * w)))
+                top = max(0, min(h - 1, math.floor(y0 * h)))
+                bottom = max(top + 1, min(h, math.ceil(y1 * h)))
+
+                model_input = model_input[top:bottom, left:right, ...]
             model_input = cv2.resize(model_input, (384, 384), cv2.INTER_AREA)  # uint16 or float
             model_input = model_input.astype(np.float32) / 65535 if model_input.dtype == np.uint16 else model_input.astype(np.float32)
             model_input = model_input[..., None] if model_input.ndim == 2 else model_input
