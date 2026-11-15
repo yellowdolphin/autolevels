@@ -912,6 +912,9 @@ def main(callback=None, loaded_model=None, argv=None, images=None, return_bytes=
                 continue
 
         # Decide output file name
+        if arg.outsuffix and arg.outsuffix.endswith(('.xmp', '.pp3')) and outdir != fn.parent:
+            print("Warning: ignoring option --outdir for sidecar files")
+            outdir = fn.parent
         if arg.outfstring:
             out_fn = outdir / evaluate_fstring(arg.outfstring, arg.files[i])
         else:
