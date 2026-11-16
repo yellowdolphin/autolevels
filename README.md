@@ -6,30 +6,30 @@ AutoLevels is a program for batch-processing images to fix common issues in a se
 
 When you encounter images scanned from analog film or poorly processed by automatic corrections, such as "backlight" or simply underexposed, you will find black/white points that are too high/low. Even worse, they can differ by channel and produce a weird glow in dark areas or color cast on the entire image. Photo editing apps typically have features like "autolevel" or "enhance contrast" that could be used in batch-processing. They set black and white points to zero and 255, respectively. These might overshoot the problem, and the result may appear unnatural, particularly if the original image has low contrast. They are also not very suitable for fixing color problems.
 
-AutoLevels helps you fix these issues by letting you choose sensible target black/white points for a batch of images. It detects low-contrast images and treats them differently. Along the way, you can remove a constant color cast, change gamma and saturation. If your color cast or bad camera settings require a more complex curve correction, AutoLevels has you covered: try the AI-based free curve correction, which finds the optimal RGB curves for each image.
+AutoLevels helps you fix these issues by letting you choose sensible target black/white points for a batch of images. It detects low-contrast images and treats them differently. Along the way, you can remove a constant color cast, change gamma and saturation. If your color cast or bad camera settings require a more complex curve correction, AutoLevels has you covered: try the ML-based automatic curve correction, which finds the optimal RGB curves for each image.
 
 ## Features
 
-- Adjust black point, white point, gamma, and saturation
+- Adjusts black point, white point, gamma, and saturation
 - Fully automated curve-based color correction feature
 - Smooth/Histogram/Perceptive black/white point sampling
-- Automatically detect low-contrast images and apply sensible corrections
-- Export darktable XMP files for a professional non-destructive workflow
+- Automatically detects low-contrast images and applies sensible corrections
+- Exports curves for a professional non-destructive workflow in third-party software (darktable, RawTherapee, GIMP, Adobe Photoshop, Adobe Lightroom Classic, and more)
 - Support for 16/48-bit images (TIFF, PNG)
-- Apply ICC color profiles *after* corrections
+- Complete color management (input/output/display)
 - Flexible definition of input/output files (glob pattern, prefix/suffix, Python f-string)
 - Preserves compression quality and metadata (EXIF, IPTC, XMP, ICC-profile)
-- Free Open Source Software (GPLv3)
+- Free Open Source Software [GPLv3](https://github.com/yellowdolphin/autolevels/blob/master/LICENSE)
 
 ## Installation
 
-Python 3.10 or later is required (avoid 3.14 until onnxruntime supports it or [install their nightly build](https://github.com/microsoft/onnxruntime/issues/26547)). On most Linux distributions, this is already pre-installed. Otherwise, download it from [Python.org](https://www.python.org/downloads/) or install it via your favourite app store. Make sure you mark the checkbox "Add Python executable to PATH". Then, to install AutoLevels, open a shell (cmd on Windows) and execute:
+AutoLevels requires Python 3.10–3.14. On most Linux distributions, this is already pre-installed. Otherwise, download it from [Python.org](https://www.python.org/downloads/) or install it via your favourite app store. **Make sure you mark the checkbox "Add Python executable to PATH".** Then, to install AutoLevels, open a shell (cmd on Windows) and execute:
 
 ```bash
 pip install autolevels
 ```
 
-This will install the current stable release. To get the latest version from the github repository (requires git), use
+This will install the current stable release. To get the latest version from the GitHub repository (requires git), use
 
 ```bash
 pip install git+https://github.com/yellowdolphin/autolevels.git
@@ -39,7 +39,7 @@ This will also install the following requirements if not found:
 
 - numpy
 - pillow
-- pyexiftools
+- pyexiftool
 - python-lcms2
 - imageio
 - tifffile
@@ -60,7 +60,7 @@ To preserve metadata whenever possible, [ExifTool](https://exiftool.org/) must b
 sudo apt-get install libimage-exiftool-perl
 ```
 
-To install ExifTool on Windows or MacOS, download the zip or pkg file from [https://exiftool.org/](https://exiftool.org/) and follow the installation instructions. Make sure, the executable is added to your PATH.
+To install ExifTool on Windows or macOS, download the zip or pkg file from [https://exiftool.org/](https://exiftool.org/) and follow the installation instructions. Make sure the executable is added to your PATH.
 
 ### Windows 10
 
@@ -72,7 +72,7 @@ pip install onnxruntime==1.20.1
 
 ## Graphical User Interface
 
-If you prefer a graphical user interface, you can checkout [RetroShine](https://retroshine.eu), which is easier to install and provides a user-friendly interface for AutoLevels.
+If you prefer a graphical user interface, you can check out [RetroShine](https://retroshine.eu), which is easier to install and provides a user-friendly interface for AutoLevels.
 
 ## Documentation
 
@@ -112,7 +112,7 @@ This leaves you with defining input and output files and paths. AutoLevels gives
 
    Your shell will interpret these glob patterns and expand the file names to `scans/12.png scans/23.png IMG_0015.jpg ...` matching any existing files in the current directory. All output files are written to the specified folder `processed`.
 
-   If you are afraid the expanded list of file paths exceeds the shell limit for the length of a command, you can specify a folder for the input files and enter the glob pattern in quotes to escape shell expansion:
+   If you are afraid the expanded list of file paths exceeds the shell limit for the length of a command, you can specify a folder for the input files and enter the glob pattern in quotes to prevent shell expansion:
 
    ```bash
    autolevels --folder ~/Pictures/scans -- "*.tif"
@@ -122,7 +122,7 @@ This leaves you with defining input and output files and paths. AutoLevels gives
    Often, your input file names will have a common folder, prefix, suffix, and some variable part in between. You may want to keep the variable part and change any of the fixed components, for example:
 
    ```bash
-   autolevels --folder orig --prefix scn --suffix .jpg --outfolder processed --outprefix img_ --outsuffix .jpg -- 1 2 3 4
+   autolevels --folder orig --prefix scn --suffix .jpg --outdir processed --outprefix img_ --outsuffix .jpg -- 1 2 3 4
    ```
 
    This will search for input files `orig/scn1.jpg ...` and write output files `processed/img_1.jpg ...`
@@ -135,78 +135,84 @@ This leaves you with defining input and output files and paths. AutoLevels gives
    f"orig/scn_{variable:04d}.jpg"
    ```
 
-   This is proper Python code and evaluates to "orig/scn_0042.jpg". The part in curly brackets contains a variable name and (after the `:`) an optional format instruction for integer numbers `d`, which shall have leading `0`s to make `4` digits.
+   This is proper Python code and evaluates to "orig/scn_0042.jpg". The part in curly brackets contains a variable name and (after the `:`) an optional format instruction. Here, `04d` formats the integer as a four-digit decimal number, padding it with leading zeros.
 
-   If you provide an f-string to the `--fstring` or `--outfstring` options (you can skip the "f" before the quotes), AutoLevels substitutes `variable` by any values given instead of file names:
+   If you provide an f-string to the `--fstring` or `--outfstring` options (you can skip the "f" before the quotes), AutoLevels replaces `variable` with the values given instead of file names:
 
    ```bash
    autolevels --fstring "orig/scn{i}.jpg" --outfstring "processed/img_{i:04d}.jpg" -- 1 2 3
    ```
 
-   This will read files `orig/scn1.jpg ...` and write `processed/img_0001.jpg ...` to disk.
+   This will read files `orig/scn1.jpg ...` and write `processed/img_0001.jpg ...`.
 
 ### Exporting darktable XMP sidecar files
 
-You can use AutoLevels as an automatic preprocessing step in a professional, non-destructive workflow using [darktable](https://www.darktable.org). The idea is to establish a baseline color correction with the `--model` option and export the curves to darktable, where you can fine-tune them or proceed with your normal darktable workflow.
+You can use AutoLevels as an automatic preprocessing step in a professional, non-destructive workflow using [darktable](https://www.darktable.org/). The idea is to establish a baseline color correction with the `--model` option and export the curves to darktable, where you can fine-tune them or proceed with your normal darktable workflow.
 
-The recommended way to use AutoLevels curves in darktable is to install the [darktable-autolevels-module](https://github.com/yellowdolphin/darktable-autolevels-module) Lua script, which you can activate via the _scripts_ module in the lighttable view. An _AutoLevels_ module will appear in the same panel. Click the little file browser button to search for the downloaded .onnx file. Then select images and press the "add AutoLevels curve" button. Changing to the darkroom, you will find a new history item that adds an _rgb curve_ instance in mode "RGB, independent channels". Feel free to make adjustments to the curves, the original curves will remain in the history, until you compress it.
+The recommended way to use AutoLevels curves in darktable is to install the [darktable-autolevels-module](https://github.com/yellowdolphin/darktable-autolevels-module) Lua script, which you can activate via the _scripts_ module in the lighttable view. An _AutoLevels_ module will appear in the same panel. Click the little file-browser button to search for the downloaded .onnx file. Then select images and press the "add AutoLevels curve" button. Changing to the darkroom, you will find a new history item that adds an _rgb curve_ instance in mode "RGB, independent channels". Feel free to make adjustments to the curves, the original curves will remain in the history, until you compress the history stack.
 
 You might notice that the _rgb curve_ instance created by AutoLevels is applied right before the _input color profile_ module. This is where the channel-wise color correction works most effectively for JPEGs and most HDR images (RAW formats are not yet supported by the script). If you create a new _rgb curve_ instance, this will appear at the usual place in the pipeline.
 
 Under the hood, the Lua script calls `autolevels` with the `--export darktable <version>` argument:
 
 ```bash
-autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export darktable 5.3.0 --outsuffix .*.xmp -- myimage.jpg
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export darktable 5.3.0 --outsuffix ".*.xmp" -- myimage.jpg
 ```
 
-AutoLevels reads the XMP sidecar file associated with each selected image (or duplicate). It is passed via the `--outsuffix` option. If the XMP file does not exist, AutoLevels will create a minimal one with the default auto-apply presets. The `--outsuffix` option is optional and prevents AutoLevels from creating an output image if its value ends with ".xmp".
+AutoLevels reads the XMP sidecar file associated with each image. If no XMP file exist yet, AutoLevels creates a minimal one with the default auto-apply presets. The `--outsuffix` option is optional and prevents AutoLevels from creating an output image if its value ends with ".xmp". Note that the input image file extension, for example `.jpg` automatically replaces the `.*` in the specified outsuffx.
 
 If you want to call AutoLevels with the `--export darktable` option outside of darktable, note that darktable only reads XMP files on import if you have activated the `look for updated XMP files on startup` option in preferences/storage.
 
+You can export to a duplicate XMP file using an option like `--outsuffix "_01.*.xmp"` or let AutoLevels create a new duplicate using `--outsuffix "_??.*.xmp"`.
+
 ### Exporting RawTherapee PP3 sidecar files
 
-AutoLevels can read and write PP3 files associated with an image file. To export RGB curves predicted by the color correction model into RawTherapee, call it with the `--export rawtherapee` option. This reads an existing .pp3 file or creates a new one and adds an `[RGB Curves]` section to it:
+AutoLevels can read and write PP3 files associated with an image file. To export RGB curves predicted by the color correction model into [RawTherapee](https://rawtherapee.com/), call it with the `--export rawtherapee` option. This reads an existing .pp3 file or creates a new one, then adds an `[RGB Curves]` section to it:
 
 ```bash
-autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export rawtherapee --outsuffix .*.pp3 -- myimage.jpg
+autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export rawtherapee --outsuffix ".*.pp3" -- myimage.jpg
 ```
 
 When you now open the image in RawTherapee, it appears with ☑ and you will find the exported curves in the _RGB Curves_ widget in the _Color_ tab.
 
 If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
 
-### Exporting to Adobe Lightroom-compatible XMP files
+### Exporting XMP files for Adobe Lightroom Classic
 
-AutoLevels can export RGB curves predicted by the color correction model to an XMP file that can be imported in Adobe Lightroom Classic as a develop preset. Call AutoLevels with the `--export lightroom` option:
+AutoLevels can export RGB curves predicted by the color correction model as XMP develop presets compatible with [Adobe Lightroom Classic](https://www.adobe.com/products/photoshop-lightroom-classic.html) software. Call AutoLevels with the `--export lightroom` option:
 
 ```bash
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export lightroom --outsuffix .lightroom.xmp -- myimage.jpg
 ```
 
-This will produce the output file `myimage.lightroom.xmp`. Open the image in Lightroom, then import the XMP file as a preset and select it. The color correction curves will be applied to the image.
+This will produce the output file `myimage.lightroom.xmp`. Open the image in Adobe Lightroom Classic, import the XMP file as a Develop preset, and apply the preset to the image.
 
 If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
 
 ### Exporting ACV curve files
 
-AutoLevels can export RGB curves predicted by the color correction model in the ACV format, which can be read by many photo editors like [GIMP](https://www.gimp.org/) or [Adobe Photoshop](https://www.adobe.com/products/photoshop.html). Call AutoLevels with the `--export acv` option:
+AutoLevels can export RGB curves predicted by the color correction model as ACV curve filesThese files can be imported into compatible image editors, including [GIMP](https://www.gimp.org/) and [Adobe Photoshop](https://www.adobe.com/products/photoshop.html) software. Call AutoLevels with the `--export acv` option:
 
 ```bash
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export acv --outsuffix .acv -- myimage.jpg
 ```
 
-This produces a `myimage.acv` file. Open your image in GIMP 3.2 or later, open Colors → Curves..., then click on the ◀ (Manage presets) button right to the Presets selector and choose _Import Current Settings from File..._. Search for the exported ACV file and open it. The RGB curves have been loaded and you can edit them by selecting a _Channel_.
+This produces a `myimage.acv` file. Open your image in GIMP 3.2 or later, open Colors → Curves..., then click on the ◀ (Manage presets) button to the right of the _Presets_ selector and choose _Import Current Settings from File..._. Search for the exported ACV file and open it. The RGB curves have been loaded and you can edit them by selecting a _Channel_.
 
 If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
 
-### Exporting 1D LUT (lookup tables) .cube files
+### Exporting 1D LUTs in CUBE format
 
-AutoLevels can export RGB curves predicted by the color correction model as 1D LUT in the .cube text format. Call AutoLevels with the `--export cube` option:
+AutoLevels can export RGB curves predicted by the color correction model as a 1D LUT (lookup table) in the .cube text format. Call AutoLevels with the `--export cube` option:
 
 ```bash
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export cube --outsuffix .cube -- myimage.jpg
 ```
 
-This produces a `myimage.cube` file. It can be read by apps that support 1D LUT files. 3D LUT support is not sufficient. 
+This produces a `myimage.cube` file. It can be read by applications that support 1D LUTs in the CUBE format. Support for 3D LUTs alone does not necessarily imply support for 1D LUTs.
 
 If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
+
+### Trademarks
+
+All trademarks and product names mentioned in this documentation are the property of their respective owners. AutoLevels is an independent project and is not affiliated with, endorsed by, or sponsored by any of the companies or projects mentioned herein.
