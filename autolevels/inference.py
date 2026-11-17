@@ -91,7 +91,17 @@ def get_model(filename):
         return model
     
     elif Path(filename).suffix == '.onnx':
-        import onnxruntime as ort
+        try:
+            import onnxruntime as ort
+        except ImportError as e:
+            if sys.platform == "win32" and "DLL load failed" in str(e):
+                raise ImportError(
+                    "onnxruntime failed to load a required DLL. Install the Microsoft "
+                    "Visual C++ Redistributable (x64):\nhttps://aka.ms/vs/17/release/vc_redist.x64.exe\n"
+                    "If it is already installed, please report your issue at\n"
+                    "https://github.com/yellowdolphin/autolevels/issues/"
+                )
+            raise
 
         ort_sess = ort.InferenceSession(filename, providers=["CPUExecutionProvider"])
 
