@@ -1,6 +1,3 @@
-# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
-
 name: Python package, lint, test
 
 on:
@@ -12,10 +9,29 @@ on:
 permissions:
   contents: read
 
-jobs:
-  build:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+jobs:
+  lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+    - uses: actions/checkout@v6
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: false
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        uvx flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        uvx flake8 . --count --exit-zero --max-complexity=11 --max-line-length=127 --statistics
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
       # fail-fast: false
       fail-fast: true
@@ -32,22 +48,16 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install --upgrade flit
-        if [ "${{ matrix.python-version }}" == "3.14" ]; then
+        #if [ "${{ matrix.python-version }}" == "3.14" ]; then
           # nightly onnxruntime build supports python 3.14 (https://github.com/microsoft/onnxruntime/issues/26547)
-          pip install flatbuffers "numpy==2.2.6" packaging protobuf sympy
-          pip install --pre --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ onnxruntime
-        fi
+          #pip install flatbuffers "numpy==2.2.6" packaging protobuf sympy
+          #pip install --pre --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ onnxruntime
+        #fi
         flit install --symlink  # requires numpy-2.2.6 for python 3.14
+        pip freeze
     - name: Install ExifTool
       run: |
         sudo apt-get update
         sudo apt-get install -y libimage-exiftool-perl
-    - name: Lint with flake8
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=11 --max-line-length=127 --statistics
     - name: Test with pytest
-      run: |
-        pytest
+      run: pytest
