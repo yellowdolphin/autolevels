@@ -1,4 +1,7 @@
 # Changelog
+### v1.5.1
+Release date: 2026-11-19
+- smoothen curves with Gaussian convolution
 
 ### v1.5.0
 Release date: 2026-11-15
