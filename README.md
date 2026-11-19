@@ -98,6 +98,14 @@ Safely try out settings before writing any output files with `--simulate` or `--
 autolevels --simulate --blackpoint 10 5 0 --mode perceptive -- *.jpg
 ```
 
+If your image contains a border that is not part of the actual image, you can specify a _region of interest_ to be evaluated when predicting the RGB color correction curves. Add the `--roi` option with four normalized bounding box coordinates:
+
+```bash
+autolevels --roi 0.05 0.95 0.20 0.80 --model ~/Downloads/free_xcittiny_wa14.onnx -- example.jpg
+```
+
+This example ignores 5 % of the width and 20 % of the height of the image.
+
 ### Batch Processing
 
 The power of batch processing lets you apply the same corrections to a batch of images with a common capture source, camera settings, lighting conditions, or any common issue that can be fixed in a semi-automated fashion. If you don't have the time or expertise to find the optimal parameters, you can leverage AI power using the `--model` option. This will correct each image with individual RGB curves, fully automatic, correcting color casts, bad exposure, or white balance settings on the fly.
@@ -197,7 +205,9 @@ AutoLevels can export RGB curves predicted by the color correction model as ACV 
 autolevels --model ~/Downloads/free_xcittiny_wa14.onnx --export acv --outsuffix .acv -- myimage.jpg
 ```
 
-This produces a `myimage.acv` file. Open your image in GIMP 3.2 or later, open Colors → Curves..., then click on the ◀ (Manage presets) button to the right of the _Presets_ selector and choose _Import Current Settings from File..._. Search for the exported ACV file and open it. The RGB curves have been loaded and you can edit them by selecting a _Channel_.
+This produces a `myimage.acv` file. Open your image in GIMP 3.2 or later, open Colors → Curves…, then click on the ◀ (Manage presets) button to the right of the _Presets_ selector and choose _Import Current Settings from File…_. Search for the exported ACV file and open it. The RGB curves have been loaded and you can edit them by selecting a _Channel_.
+
+To import the curves into Adobe Photoshop, add a _Curves_ adjustment layer to your image and in the properties panel click the menu button and select "Load Curves Preset…". Search for your exported ACV file and open it. To edit the curves, select the red, green, or blue _Channel_.
 
 If the `--outsuffix` option is omitted or used to specify an image format, AutoLevels also writes an output image.
 

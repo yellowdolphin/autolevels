@@ -2,15 +2,28 @@ from pathlib import Path
 from shutil import rmtree
 from subprocess import run
 import os
+import sys
 import numpy as np
 import h5py
 
 
-def monotonize(curves):
+def gauss(y, sigma=2.875):
+    """Gaussian convolution filter with asymmetric padding"""
+    r = int(4 * sigma + 0.5)
+    k = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma) ** 2)
+    k /= k.sum()
+
+    # This padding before Gaussian conv preserves the curves end points and avoids clipping.
+    padded = np.pad(np.pad(y, (r, 0), mode='edge'), (0, r), mode='reflect', reflect_type='odd')
+    return np.convolve(padded, k, mode='valid')
+
+
+def monotonize_and_smoothen(curves):
     input_shape = curves.shape
     curves = curves.reshape(3, 256)
     for i in range(254, -1, -1):
         curves[:, i] = np.min(curves[:, i:], axis=1)
+    curves = np.stack([gauss(curves[i, :]) for i in range(3)], axis=0)
     return curves.reshape(input_shape)
 
 
@@ -33,7 +46,7 @@ def get_model(filename):
 
             # post-process preds
             preds = np.clip(preds, 0, 1)
-            preds = monotonize(preds)
+            preds = monotonize_and_smoothen(preds)
 
             return preds
 
@@ -83,7 +96,7 @@ def get_model(filename):
 
             # post-process preds
             preds = np.clip(preds, 0, 1)
-            preds = monotonize(preds)
+            preds = monotonize_and_smoothen(preds)
 
             return preds
         model.input_size = getattr(tf_model, 'input_shape', (None, 384, 384, 3))[1:3]
@@ -117,7 +130,7 @@ def get_model(filename):
 
             # post-process preds
             preds = np.clip(preds, 0, 1)
-            preds = monotonize(preds)
+            preds = monotonize_and_smoothen(preds)
 
             return preds
 
